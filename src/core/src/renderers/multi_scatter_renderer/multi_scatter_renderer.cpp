@@ -45,15 +45,6 @@ public:
         return render_techniques;
     }
 
-    RenderOptionList getRenderOptions() noexcept override
-    {
-        RenderOptionList newOptions;
-        /***** Configure any default options here                                 *****/
-        /***** Example:                                                           *****/
-        /*****  newOptions.emplace("matching name of existing option", newValue); *****/
-        return newOptions;
-    }
-
 private:
 };
 } // namespace Capsaicin
