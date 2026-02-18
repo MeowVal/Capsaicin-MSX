@@ -1,3 +1,4 @@
+
 Texture2D g_BaseColor : register(t1);
 Texture2D g_RoughnessMetallic : register(t2);
 Texture2D g_NormalMap : register(t3);
@@ -41,7 +42,8 @@ PSOutput main(PSInput input)
     float3 nMap = g_NormalMap.Sample(g_Sampler, input.texcoord).xyz;
     nMap = DecodeNormalMap(nMap);
 
-    float3 worldNormal = normalize(float3x3(T, B, N) * nMap);
+    float3x3 TBN = float3x3(T, B, N); // 3 float3 → 3x3 matrix
+    float3 worldNormal = normalize(mul(nMap, TBN));
 
     // Albedo
     float4 baseColorTex = g_BaseColor.Sample(g_Sampler, input.texcoord);
