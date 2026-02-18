@@ -66,7 +66,8 @@ PSOutput main(PSInput input)
     o.outNormal = float4(worldNormal * 0.5f + 0.5f, 1.0f);
 
     // Albedo
-    o.outAlbedo = float4(baseColor, alpha);
+    //o.outAlbedo = float4(baseColor, alpha);
+    o.outAlbedo = float4(1, 0, 1, 1);
 
     // Roughness, Metallic, AO, Emissive
     o.outMaterial = float4(rough, metal, ao, emissiveIntensity);

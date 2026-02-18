@@ -69,18 +69,29 @@ SharedTextureList MultiScatterTests::getSharedTextures() const noexcept
     /***** Push any desired shared textures to the returned list here (else just 'return {}' or dont
      * override) *****/
     textures.push_back({.name = "GBufferNormal",
-        .access               = SharedTexture::Access::Write,
+        .access               = SharedTexture::Access::ReadWrite,
         .flags                = SharedTexture::Flags::None,
         .format               = DXGI_FORMAT_R16G16B16A16_FLOAT});
     textures.push_back({.name = "GBufferAlbedo",
-        .access               = SharedTexture::Access::Write,
+        .access               = SharedTexture::Access::ReadWrite,
         .flags                = SharedTexture::Flags::None,
         .format               = DXGI_FORMAT_R16G16B16A16_FLOAT});
     textures.push_back({.name = "GBufferMaterial",
+        .access               = SharedTexture::Access::ReadWrite,
+        .flags                = SharedTexture::Flags::None,
+        .format               = DXGI_FORMAT_R16G16B16A16_FLOAT});
+    textures.push_back({.name = "GBufferWorldPos",
+        .access               = SharedTexture::Access::ReadWrite,
+        .flags                = SharedTexture::Flags::None,
+        .format               = DXGI_FORMAT_R16G16B16A16_FLOAT});
+    textures.push_back({.name = "MSXColor",
         .access               = SharedTexture::Access::Write,
         .flags                = SharedTexture::Flags::None,
         .format               = DXGI_FORMAT_R16G16B16A16_FLOAT});
-    textures.push_back({.name = "Depth", .access = SharedTexture::Access::ReadWrite});
+    textures.push_back({.name = "Depth",
+        .access               = SharedTexture::Access::ReadWrite,
+        .flags                = SharedTexture::Flags::None,
+        .format               = DXGI_FORMAT_D32_FLOAT});
     return textures;
 }
 
@@ -92,6 +103,7 @@ DebugViewList MultiScatterTests::getDebugViews() const noexcept
     views.emplace_back("GBufferNormal");
     views.emplace_back("GBufferAlbedo");
     views.emplace_back("GBufferMaterial");
+    views.emplace_back("MSXColor");
     return views;
 }
 
@@ -106,24 +118,35 @@ bool MultiScatterTests::init(CapsaicinInternal const &capsaicin) noexcept
     {
         return false;
     }
-
+    
     // G-buffer draw state
     GfxDrawState gbufState;
     gfxDrawStateSetColorTarget(gbufState, 0, capsaicin.getSharedTexture("GBufferNormal").getFormat());
     gfxDrawStateSetColorTarget(gbufState, 1, capsaicin.getSharedTexture("GBufferAlbedo").getFormat());
     gfxDrawStateSetColorTarget(gbufState, 2, capsaicin.getSharedTexture("GBufferMaterial").getFormat());
+    gfxDrawStateSetColorTarget(gbufState, 3, capsaicin.getSharedTexture("GBufferWorldPos").getFormat());
     gfxDrawStateSetDepthStencilTarget(gbufState, capsaicin.getSharedTexture("Depth").getFormat());
     gfxDrawStateSetPrimitiveTopologyType(gbufState, D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE);
     gbufferKernel_ = gfxCreateGraphicsKernel(gfx_, gbufferProgram_, gbufState);
 
     // Shading draw state (fullscreen)
     GfxDrawState shadeState;
-    gfxDrawStateSetColorTarget(shadeState, 0, capsaicin.getSharedTexture("Color").getFormat());
+    gfxDrawStateSetColorTarget(shadeState, 0, capsaicin.getSharedTexture("MSXColor").getFormat());
     gfxDrawStateSetPrimitiveTopologyType(shadeState, D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE);
     shadingKernel_ = gfxCreateGraphicsKernel(gfx_, shadingProgram_, shadeState);
 
     frameCB_ = gfxCreateBuffer(capsaicin.getGfx(), sizeof(RenderOptions), nullptr, kGfxCpuAccess_Write);
     frameCB_.setStride(sizeof(RenderOptions));
+    auto gbufN = capsaicin.getSharedTexture("GBufferNormal");
+    auto gbufA = capsaicin.getSharedTexture("GBufferAlbedo");
+    auto gbufM = capsaicin.getSharedTexture("GBufferMaterial");
+    auto depth = capsaicin.getSharedTexture("Depth");
+    auto color = capsaicin.getSharedTexture("MSXColor");
+    assert(gbufN);
+    assert(gbufA);
+    assert(gbufM);
+    assert(depth);
+    assert(color);
 
     /*auto const                light_sampler = capsaicin.getComponent<LightSampler>();
     std::vector const         defines(light_sampler->getShaderDefines(capsaicin));
@@ -142,7 +165,7 @@ bool MultiScatterTests::init(CapsaicinInternal const &capsaicin) noexcept
     return !!gbufferKernel_ && !!shadingKernel_ && !!frameCB_;
 }
 
-void MultiScatterTests::render(CapsaicinInternal &capsaicin) noexcept 
+void MultiScatterTests::render([[maybe_unused]] CapsaicinInternal &capsaicin) noexcept
 {
     /***** If any options are provided they should be checked for changes here *****/
     /***** Example:                                                            *****/
@@ -151,7 +174,7 @@ void MultiScatterTests::render(CapsaicinInternal &capsaicin) noexcept
     /*****  options = newOptions;                                              *****/
     /***** Perform any required rendering operations here                      *****/
     /***** Debug Views can be checked with 'capsaicin.getCurrentDebugView()'   *****/
-
+   
     RenderOptions options = convertOptions(capsaicin.getOptions());
     auto const debug_view = capsaicin.getCurrentDebugView();
     options_    = options;
@@ -165,22 +188,35 @@ void MultiScatterTests::render(CapsaicinInternal &capsaicin) noexcept
     }
     
     uint2 dim = capsaicin.getRenderDimensions();
-
+    auto  n   = capsaicin.getSharedTexture("GBufferNormal");
+    auto  a   = capsaicin.getSharedTexture("GBufferAlbedo");
+    auto  m   = capsaicin.getSharedTexture("GBufferMaterial");
+    auto  wp  = capsaicin.getSharedTexture("GBufferWorldPos");
+    auto  d   = capsaicin.getSharedTexture("Depth");
+    assert(n);
+    assert(a);
+    assert(m);
+    assert(wp);
+    assert(d);
     // ---------- G-BUFFER PASS ----------
     gfxCommandBindColorTarget(gfx_, 0, capsaicin.getSharedTexture("GBufferNormal"));
     gfxCommandBindColorTarget(gfx_, 1, capsaicin.getSharedTexture("GBufferAlbedo"));
     gfxCommandBindColorTarget(gfx_, 2, capsaicin.getSharedTexture("GBufferMaterial"));
+    gfxCommandBindColorTarget(gfx_, 3, capsaicin.getSharedTexture("GBufferWorldPos"));
     gfxCommandBindDepthStencilTarget(gfx_, capsaicin.getSharedTexture("Depth"));
     gfxCommandSetViewport(gfx_, 0.0f, 0.0f, (float)dim.x, (float)dim.y);
     gfxCommandSetScissorRect(gfx_, 0, 0, (int32_t)dim.x, (int32_t)dim.y);
     gfxCommandBindKernel(gfx_, gbufferKernel_);
     gfxCommandBindVertexBuffer(gfx_, capsaicin.getVertexBuffer());
     gfxCommandBindIndexBuffer(gfx_, capsaicin.getIndexBuffer());
-    gfxCommandDrawIndexed(gfx_, capsaicin.getTriangleCount() * 3);
-
+    gfxCommandDrawIndexed(gfx_, capsaicin.getTriangleCount());
+    
+    
     // ---------- SHADING PASS ----------
-    gfxCommandBindColorTarget(gfx_, 0, capsaicin.getSharedTexture("Color"));
-    gfxCommandBindDepthStencilTarget(gfx_, GfxTexture {}); // no depth
+    auto color = capsaicin.getSharedTexture("MSXColor");
+    assert(color);
+    gfxCommandBindColorTarget(gfx_, 0, capsaicin.getSharedTexture("MSXColor"));
+    gfxCommandBindDepthStencilTarget(gfx_, capsaicin.getSharedTexture("Depth")); // no depth
 
     gfxCommandSetViewport(gfx_, 0.0f, 0.0f, (float)dim.x, (float)dim.y);
     gfxCommandSetScissorRect(gfx_, 0, 0, (int32_t)dim.x, (int32_t)dim.y);
@@ -188,8 +224,8 @@ void MultiScatterTests::render(CapsaicinInternal &capsaicin) noexcept
     gfxProgramSetParameter(gfx_, shadingProgram_, "GNormal", capsaicin.getSharedTexture("GBufferNormal"));
     gfxProgramSetParameter(gfx_, shadingProgram_, "GAlbedo", capsaicin.getSharedTexture("GBufferAlbedo"));
     gfxProgramSetParameter(gfx_, shadingProgram_, "GMaterial", capsaicin.getSharedTexture("GBufferMaterial"));
+    gfxProgramSetParameter(gfx_, shadingProgram_, "GWorldPos", capsaicin.getSharedTexture("GBufferWorldPos"));
     gfxProgramSetParameter(gfx_, shadingProgram_, "FrameCB", frameCB_);
-
     gfxProgramSetParameter(gfx_, shadingProgram_, "g_BufferDimensions", dim);
     gfxProgramSetParameter(gfx_, shadingProgram_, "g_Camera", capsaicin.getCamera());
 
