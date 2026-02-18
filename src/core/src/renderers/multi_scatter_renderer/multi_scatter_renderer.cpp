@@ -27,7 +27,7 @@ public:
     MultiScatterRenderer() noexcept {}
 
     std::vector<std::unique_ptr<RenderTechnique>> setupRenderTechniques(
-        RenderOptionList const &renderOptions) noexcept override
+        [[maybe_unused]] RenderOptionList const &renderOptions) noexcept override
     {
         std::vector<std::unique_ptr<RenderTechnique>> render_techniques;
         /***** Emplace any desired render techniques to the returned list here *****/

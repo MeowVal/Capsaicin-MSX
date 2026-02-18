@@ -1,31 +1,39 @@
-#version 460 core
-
-layout(location = 0) in vec3 inPosition;
-layout(location = 1) in vec3 inNormal;
-layout(location = 2) in vec2 inTexcoord;
-layout(location = 3) in vec3 inTangent;
-
-layout(std140, binding = 0) uniform CameraMatrices
+struct VSInput
 {
-    mat4 u_View;
-    mat4 u_Proj;
-    mat4 u_ViewProj;
-    mat4 u_PrevViewProj;
-} g_CameraMatrices;
+    float3 position : POSITION;
+    float3 normal : NORMAL;
+    float2 texcoord : TEXCOORD0;
+    float3 tangent : TANGENT;
+};
 
-out VS_OUT
+cbuffer CameraMatrices : register(b0)
 {
-    vec3 worldPos;
-    vec3 worldNormal;
-    vec2 texcoord;
-} vs_out;
+    float4x4 u_View;
+    float4x4 u_Proj;
+    float4x4 u_ViewProj;
+    float4x4 u_PrevViewProj;
+};
 
-void main()
+struct VSOutput
 {
-    vec4 wp = vec4(inPosition, 1.0);
-    vs_out.worldPos    = wp.xyz;
-    vs_out.worldNormal = normalize(inNormal);
-    vs_out.texcoord    = inTexcoord;
+    float4 position : SV_Position;
+    float3 worldPos : TEXCOORD0;
+    float3 worldNormal : TEXCOORD1;
+    float3 worldTangent : TEXCOORD2;
+    float2 texcoord : TEXCOORD3;
+};
 
-    gl_Position = g_CameraMatrices.u_ViewProj * wp;
+VSOutput main(VSInput input)
+{
+    VSOutput o;
+
+    float4 wp = float4(input.position, 1.0f);
+
+    o.worldPos = wp.xyz;
+    o.worldNormal = normalize(input.normal);
+    o.worldTangent = normalize(input.tangent);
+    o.texcoord = input.texcoord;
+
+    o.position = mul(u_ViewProj, wp);
+    return o;
 }

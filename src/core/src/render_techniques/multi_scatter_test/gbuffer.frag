@@ -1,29 +1,76 @@
-#version 460 core
+Texture2D g_BaseColor : register(t1);
+Texture2D g_RoughnessMetallic : register(t2);
+Texture2D g_NormalMap : register(t3);
+Texture2D g_AO : register(t4);
+Texture2D g_Emissive : register(t5);
 
-in VS_OUT
+SamplerState g_Sampler : register(s0);
+
+struct PSInput
 {
-    vec3 worldPos;
-    vec3 worldNormal;
-    vec2 texcoord;
-} fs_in;
+    float4 position : SV_Position;
+    float3 worldPos : TEXCOORD0;
+    float3 worldNormal : TEXCOORD1;
+    float3 worldTangent : TEXCOORD2;
+    float2 texcoord : TEXCOORD3;
+};
 
-layout(location = 0) out vec4 outNormal;
-layout(location = 1) out vec4 outAlbedo;
-layout(location = 2) out vec4 outMaterial;
-
-layout(binding = 1) uniform sampler2D g_BaseColor;
-layout(binding = 2) uniform sampler2D g_RoughnessMetallic;
-
-void main()
+struct PSOutput
 {
-    vec3 N = normalize(fs_in.worldNormal);
+    float4 outNormal : SV_Target0;
+    float4 outAlbedo : SV_Target1;
+    float4 outMaterial : SV_Target2;
+    float4 outWorldPos : SV_Target3;
+};
 
-    vec3 baseColor = texture(g_BaseColor, fs_in.texcoord).rgb;
-    vec2 rm        = texture(g_RoughnessMetallic, fs_in.texcoord).rg;
-    float rough    = rm.r;
-    float metal    = rm.g;
+float3 DecodeNormalMap(float3 n)
+{
+    return normalize(n * 2.0f - 1.0f);
+}
 
-    outNormal   = vec4(normalize(N) * 0.5 + 0.5, 1.0);
-    outAlbedo   = vec4(baseColor, 1.0);
-    outMaterial = vec4(rough, metal, 0.0, 0.0);
+PSOutput main(PSInput input)
+{
+    PSOutput o;
+
+    // Base geometry normal
+    float3 N = normalize(input.worldNormal);
+    float3 T = normalize(input.worldTangent);
+    float3 B = normalize(cross(N, T));
+
+    // Normal map
+    float3 nMap = g_NormalMap.Sample(g_Sampler, input.texcoord).xyz;
+    nMap = DecodeNormalMap(nMap);
+
+    float3 worldNormal = normalize(float3x3(T, B, N) * nMap);
+
+    // Albedo
+    float4 baseColorTex = g_BaseColor.Sample(g_Sampler, input.texcoord);
+    float3 baseColor = baseColorTex.rgb;
+    float alpha = baseColorTex.a;
+
+    // Roughness / Metallic
+    float2 rm = g_RoughnessMetallic.Sample(g_Sampler, input.texcoord).rg;
+    float rough = saturate(rm.r);
+    float metal = saturate(rm.g);
+
+    // AO
+    float ao = g_AO.Sample(g_Sampler, input.texcoord).r;
+
+    // Emissive
+    float3 emissive = g_Emissive.Sample(g_Sampler, input.texcoord).rgb;
+    float emissiveIntensity = max(max(emissive.r, emissive.g), emissive.b);
+
+    // Encode normal
+    o.outNormal = float4(worldNormal * 0.5f + 0.5f, 1.0f);
+
+    // Albedo
+    o.outAlbedo = float4(baseColor, alpha);
+
+    // Roughness, Metallic, AO, Emissive
+    o.outMaterial = float4(rough, metal, ao, emissiveIntensity);
+
+    // World position
+    o.outWorldPos = float4(input.worldPos, 1.0f);
+
+    return o;
 }
