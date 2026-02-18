@@ -46,7 +46,7 @@ float3 Cook_Torrance(float3 N, float3 V, float3 L, float3 albedo, float rough, f
 
 float3 Fast_MSX(float3 N, float3 V, float3 L, float3 albedo, float rough, float metal)
 {
-    return albedo * 0.8f;
+    return float3(1,0,1) ;
 }
 
 float3 Heitz(float3 N, float3 V, float3 L, float3 albedo, float rough, float metal)

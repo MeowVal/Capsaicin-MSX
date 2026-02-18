@@ -90,8 +90,6 @@ protected:
     /***** Internal member data can be added here *****/
     /***** Example:                               *****/
     RenderOptions options_;
-    GfxProgram    gbufferProgram_; // VS+FS for raster G-buffer
-    GfxKernel     gbufferKernel_;
     GfxProgram    shadingProgram_; // fullscreen BRDF shading
     GfxKernel     shadingKernel_;  // if you run it as a compute/fullscreen kernel
     GfxBuffer     frameCB_;        // constant/uniform buffer for options + frame data

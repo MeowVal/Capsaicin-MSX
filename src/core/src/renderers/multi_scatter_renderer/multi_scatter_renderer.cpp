@@ -16,34 +16,34 @@
 namespace Capsaicin
 {
 class MultiScatterRenderer
-    : public Renderer
-    , public RendererFactory::Registrar<MultiScatterRenderer>
+	: public Renderer
+	, public RendererFactory::Registrar<MultiScatterRenderer>
 {
 public:
-    /***** Must define unique name to represent new type *****/
-    static constexpr std::string_view Name = "Multi-Scatter Test Renderer";
+	/***** Must define unique name to represent new type *****/
+	static constexpr std::string_view Name = "Multi-Scatter Test Renderer";
 
-    /***** Must have empty constructor *****/
-    MultiScatterRenderer() noexcept {}
+	/***** Must have empty constructor *****/
+	MultiScatterRenderer() noexcept {}
 
-    std::vector<std::unique_ptr<RenderTechnique>> setupRenderTechniques(
-        [[maybe_unused]] RenderOptionList const &renderOptions) noexcept override
-    {
-        std::vector<std::unique_ptr<RenderTechnique>> render_techniques;
-        /***** Emplace any desired render techniques to the returned list here *****/
-        render_techniques.emplace_back(std::make_unique<VisibilityBuffer>());
-        render_techniques.emplace_back(std::make_unique<SSGI>());
-        render_techniques.emplace_back(std::make_unique<MultiScatterTests>());
-        render_techniques.emplace_back(std::make_unique<Atmosphere>());
-        render_techniques.emplace_back(std::make_unique<Skybox>());
-        render_techniques.emplace_back(std::make_unique<Combine>());
-        render_techniques.emplace_back(std::make_unique<FSR>());
-        render_techniques.emplace_back(std::make_unique<AutoExposure>());
-        render_techniques.emplace_back(std::make_unique<Bloom>());
-        render_techniques.emplace_back(std::make_unique<ToneMapping>());
-        render_techniques.emplace_back(std::make_unique<Lens>());
-        return render_techniques;
-    }
+	std::vector<std::unique_ptr<RenderTechnique>> setupRenderTechniques(
+		[[maybe_unused]] RenderOptionList const &renderOptions) noexcept override
+	{
+		std::vector<std::unique_ptr<RenderTechnique>> render_techniques;
+		/***** Emplace any desired render techniques to the returned list here *****/
+		render_techniques.emplace_back(std::make_unique<VisibilityBuffer>());
+		render_techniques.emplace_back(std::make_unique<SSGI>());
+		render_techniques.emplace_back(std::make_unique<MultiScatterTests>());
+		render_techniques.emplace_back(std::make_unique<Atmosphere>());
+		render_techniques.emplace_back(std::make_unique<Skybox>());
+		render_techniques.emplace_back(std::make_unique<Combine>());
+		render_techniques.emplace_back(std::make_unique<FSR>());
+		render_techniques.emplace_back(std::make_unique<AutoExposure>());
+		render_techniques.emplace_back(std::make_unique<Bloom>());
+		render_techniques.emplace_back(std::make_unique<ToneMapping>());
+		render_techniques.emplace_back(std::make_unique<Lens>());
+		return render_techniques;
+	}
 
 private:
 };
