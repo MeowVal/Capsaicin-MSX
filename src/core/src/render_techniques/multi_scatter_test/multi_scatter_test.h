@@ -15,7 +15,13 @@ public:
     
 
     RenderOptionList getRenderOptions() noexcept override;
-    
+
+    struct FrameCBData
+    {
+        int       brdf_model;
+        int       pad0, pad1, pad2; // padding to 16‑byte alignment
+        glm::mat4 view_proj_inv;
+    };
 
     struct RenderOptions
     {

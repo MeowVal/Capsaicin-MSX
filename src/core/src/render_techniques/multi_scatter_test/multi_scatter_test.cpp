@@ -72,10 +72,10 @@ SharedTextureList MultiScatterTests::getSharedTextures() const noexcept
 		.access               = SharedTexture::Access::Write,
 		.flags                = SharedTexture::Flags::None,
 		.format               = DXGI_FORMAT_R16G16B16A16_FLOAT});
-	textures.push_back({.name = "Depth",
+	/*textures.push_back({.name = "Depth",
 		.access               = SharedTexture::Access::ReadWrite,
 		.flags                = SharedTexture::Flags::None,
-		.format               = DXGI_FORMAT_D32_FLOAT});
+		.format               = DXGI_FORMAT_D32_FLOAT});*/
 	return textures;
 }
 
@@ -101,16 +101,16 @@ bool MultiScatterTests::init(CapsaicinInternal const &capsaicin) noexcept
 
 	// Shading draw state (fullscreen)
 	GfxDrawState shadeState;
-	gfxDrawStateSetDepthStencilTarget(shadeState, capsaicin.getSharedTexture("Depth").getFormat());
+	//gfxDrawStateSetDepthStencilTarget(shadeState, capsaicin.getSharedTexture("Depth").getFormat());
 	gfxDrawStateSetColorTarget(shadeState, 0, capsaicin.getSharedTexture("MSXColor").getFormat());
 	gfxDrawStateSetPrimitiveTopologyType(shadeState, D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE);
 	shadingKernel_ = gfxCreateGraphicsKernel(gfx_, shadingProgram_, shadeState);
 
-	frameCB_ = gfxCreateBuffer(capsaicin.getGfx(), sizeof(RenderOptions), nullptr, kGfxCpuAccess_Write);
-	frameCB_.setStride(sizeof(RenderOptions));
-	auto depth = capsaicin.getSharedTexture("Depth");
+	frameCB_ = gfxCreateBuffer(capsaicin.getGfx(), sizeof(FrameCBData), nullptr, kGfxCpuAccess_Write);
+    frameCB_.setStride(sizeof(FrameCBData));
+	//auto depth = capsaicin.getSharedTexture("Depth");
 	auto color = capsaicin.getSharedTexture("MSXColor");
-	assert(depth);
+	//assert(depth);
 	assert(color);
 
 	/*auto const                light_sampler = capsaicin.getComponent<LightSampler>();
@@ -146,12 +146,7 @@ void MultiScatterTests::render([[maybe_unused]] CapsaicinInternal &capsaicin) no
 
 	debug_view_              = debug_view;
 
-	struct FrameCBData
-	{
-		int brdf_model;
-		int pad0, pad1, pad2; // padding to 16‑byte alignment 
-		glm::mat4 view_proj_inv; 
-	};
+	
 
 	if (frameCB_.getCpuAccess() == kGfxCpuAccess_Write)
 	{
@@ -167,12 +162,12 @@ void MultiScatterTests::render([[maybe_unused]] CapsaicinInternal &capsaicin) no
 	uint2 dim = capsaicin.getRenderDimensions();
 
 	// ---------- SHADING PASS ----------
-	auto d     = capsaicin.getSharedTexture("Depth");
+	//auto d     = capsaicin.getSharedTexture("Depth");
 	auto color = capsaicin.getSharedTexture("MSXColor");
 	assert(color);
-	assert(d);
+	//assert(d);
 	gfxCommandBindColorTarget(gfx_, 0, capsaicin.getSharedTexture("MSXColor"));
-	gfxCommandBindDepthStencilTarget(gfx_, capsaicin.getSharedTexture("Depth")); // no depth
+	//gfxCommandBindDepthStencilTarget(gfx_, capsaicin.getSharedTexture("Depth")); // no depth
 
 	gfxCommandSetViewport(gfx_, 0.0f, 0.0f, (float)dim.x, (float)dim.y);
 	gfxCommandSetScissorRect(gfx_, 0, 0, (int32_t)dim.x, (int32_t)dim.y);

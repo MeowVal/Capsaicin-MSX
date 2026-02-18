@@ -59,7 +59,7 @@ float3 transformPointProjection(float2 uv, float depth, float4x4 invViewProj)
 
 float4 main(float4 pos : SV_Position) : SV_Target0
 {
-	uint2 did = uint2(pos.xy);
+	/*uint2 did = uint2(pos.xy);
 	float2 uv = (did + 0.5f) / g_BufferDimensions;
 	float depth = g_DepthBuffer.Load(int3(did, 0)).x;
 	if (depth <= 0.0f)
@@ -98,8 +98,9 @@ float4 main(float4 pos : SV_Position) : SV_Target0
 		color = Heitz(N, V, L, brdf.albedo, me.roughness, me.metallicity);
 
 	float NdotL = saturate(dot(N, L));
-	color *= kLightCol * NdotL;
-    color = kLightCol;
+	color *= kLightCol * NdotL;*/
+    float3 color;
+    color = float3(1, 0, 1);
 	return float4(color, 1.0f);
 }
 
