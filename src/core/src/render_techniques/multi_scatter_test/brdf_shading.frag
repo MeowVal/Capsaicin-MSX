@@ -10,7 +10,7 @@ float3 g_Eye;
 float2 g_NearFar;
 uint g_FrameIndex;
 uint2 g_BufferDimensions;
-uint g_DisableAlbedoTextures;
+//uint g_DisableAlbedoTextures;
 
 Texture2D g_DepthBuffer;
 Texture2D g_ShadingNormalBuffer;
@@ -20,8 +20,8 @@ Texture2D g_VisibilityBuffer;
 Texture2D g_OcclusionAndBentNormalBuffer;
 
 
-Texture2D g_LutBuffer;
-uint g_LutSize;
+//Texture2D g_LutBuffer;
+//uint g_LutSize;
 
 StructuredBuffer<uint> g_IndexBuffer;
 StructuredBuffer<Vertex> g_VertexBuffer;
@@ -29,8 +29,9 @@ uint g_VertexDataIndex;
 StructuredBuffer<Instance> g_InstanceBuffer;
 StructuredBuffer<Material> g_MaterialBuffer;
 
-RWTexture2D<float4> g_IrradianceBuffer;
-RWTexture2D<float4> g_ReflectionBuffer;
+//RWTexture2D<float4> g_IrradianceBuffer;
+//RWTexture2D<float4> g_ReflectionBuffer;
+TextureCube g_EnvironmentBuffer;
 
 Texture2D g_TextureMaps[] : register(space99);
 SamplerState g_NearestSampler;
@@ -40,26 +41,24 @@ SamplerState g_TextureSampler;
 #include "math/math_constants.hlsl"
 #include "geometry/geometry.hlsl"
 #include "geometry/mesh.hlsl"
-//#include "lights/light_evaluation.hlsl"
+#include "lights/light_evaluation.hlsl"
 #include "materials/material_evaluation.hlsl"
 #include "materials/material_sampling.hlsl"
+#include "math/transform.hlsl"
+
 #include "brdf_models.hlsl"
 
 
 static const float3 kLightDir = normalize(float3(0.4f, 0.8f, 0.2f));
 static const float3 kLightCol = float3(1.0f, 1.0f, 1.0f);
 
-float3 transformPointProjection(float2 uv, float depth, float4x4 invViewProj)
-{
-	float4 clip = float4(uv * 2.0f - 1.0f, depth, 1.0f);
-	float4 world = mul(invViewProj, clip);
-	return world.xyz / world.w;
-}
+
 
 
 float4 main(float4 pos : SV_Position) : SV_Target0
 {
-	/*uint2 did = uint2(pos.xy);
+    
+	uint2 did = uint2(pos.xy);
 	float2 uv = (did + 0.5f) / g_BufferDimensions;
 	float depth = g_DepthBuffer.Load(int3(did, 0)).x;
 	if (depth <= 0.0f)
@@ -87,21 +86,21 @@ float4 main(float4 pos : SV_Position) : SV_Target0
 	
 
 	float3 V = normalize(g_Eye - worldPos);
-	float3 L = normalize(-kLightDir);
+	float3 L = normalize(kLightDir);
 
 	float3 color;
 	if (g_BRDFModel == 0)
-		color = Cook_Torrance(N, V, L, brdf.albedo, me.roughness, me.metallicity);
+		color = Cook_Torrance(N, V, L, me.albedo, me.roughness, me.metallicity);
 	else if (g_BRDFModel == 1)
 		color = Fast_MSX(N, V, L, brdf.albedo, me.roughness, me.metallicity);
 	else
 		color = Heitz(N, V, L, brdf.albedo, me.roughness, me.metallicity);
 
 	float NdotL = saturate(dot(N, L));
-	color *= kLightCol * NdotL;*/
-    float3 color;
-    color = float3(1, 0, 1);
+	//color *= kLightCol * NdotL;
 	return float4(color, 1.0f);
+
+	
 }
 
 
