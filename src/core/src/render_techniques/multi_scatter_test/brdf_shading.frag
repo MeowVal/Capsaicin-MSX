@@ -41,6 +41,10 @@ SamplerState g_TextureSampler;
 #include "math/math_constants.hlsl"
 #include "geometry/geometry.hlsl"
 #include "geometry/mesh.hlsl"
+#include "components/light_builder/light_builder.hlsl"
+#include "components/random_number_generator/random_number_generator.hlsl"
+#include "components/light_sampler/light_sampler.hlsl"
+#include "lights/light_sampling.hlsl"
 #include "lights/light_evaluation.hlsl"
 #include "materials/material_evaluation.hlsl"
 #include "materials/material_sampling.hlsl"
@@ -57,7 +61,7 @@ static const float3 kLightCol = float3(1.0f, 1.0f, 1.0f);
 
 float4 main(float4 pos : SV_Position) : SV_Target0
 {
-    
+	
 	uint2 did = uint2(pos.xy);
 	float2 uv = (did + 0.5f) / g_BufferDimensions;
 	float depth = g_DepthBuffer.Load(int3(did, 0)).x;
@@ -86,21 +90,69 @@ float4 main(float4 pos : SV_Position) : SV_Target0
 	
 
 	float3 V = normalize(g_Eye - worldPos);
-	float3 L = normalize(kLightDir);
-
-	float3 color;
-	if (g_BRDFModel == 0)
-		color = Cook_Torrance(N, V, L, me.albedo, me.roughness, me.metallicity);
-	else if (g_BRDFModel == 1)
-		color = Fast_MSX(N, V, L, brdf.albedo, me.roughness, me.metallicity);
-	else
-		color = Heitz(N, V, L, brdf.albedo, me.roughness, me.metallicity);
-
-	float NdotL = saturate(dot(N, L));
-	//color *= kLightCol * NdotL;
-	return float4(color, 1.0f);
+	
+	
+	float3 totalLighting = 0.0f;
+	uint lightCount = getNumberLights();
+	// Skip lighting calculations if there are only area lights, as they require special handling (sampling the light source geometry or monte carlo integration) that is not implemented in this shader (needs ib and vb access) Also really expensive to evaluate and not common in real time scenes, so better to just skip for now
+	if (getNumberLights() == getNumberAreaLights()) 
+		return float4(0, 0, 0, 1);
+	for (uint i = 0; i < lightCount; i++)
+	{
+	
+		Light light = getLight(i);
+		LightType type = light.get_light_type();
+		// Skip area and environment lights early
+		if (type != kLight_Point &&
+		type != kLight_Spot &&
+		type != kLight_Direction)
+		{
+			continue;
+		}
+		
+		float3 L;
+		
+		if (type == kLight_Point)
+		{
+			LightPoint lp = MakeLightPoint(light);
+			L = normalize(lp.position - worldPos);
+		}
+		else if (type == kLight_Spot)
+		{
+			LightSpot sp = MakeLightSpot(light);
+			L = normalize(sp.position - worldPos);
+		}
+		else if (type == kLight_Direction)
+		{
+			LightDirectional dl = MakeLightDirectional(light);
+			L = normalize(dl.direction);
+		}
+		else
+		{
+		// Area/env lights need special handling — skiping for now (needs ib and vb access to get the actual geometry of the light source or monte carlo) 
+			continue;
+		}
+		
+		float NdotL = saturate(dot(N, L));
+		if (NdotL <= 0.0f)
+			continue;
+		
+		float3 radiance = evaluateLight(light, worldPos, L);
+		
+		float3 f;
+		if (g_BRDFModel == 0)
+			f = Cook_Torrance(N, V, L, me.albedo, me.roughness, me.metallicity);
+		else if (g_BRDFModel == 1)
+			f = Fast_MSX(N, V, L, me.albedo, me.roughness, me.metallicity);
+		else
+			f = Heitz(N, V, L, me.albedo, me.roughness, me.metallicity);
+		
+		totalLighting += f * radiance * NdotL;
+	}
+	
+	
+		
+	return float4(totalLighting, 1.0f);
 
 	
 }
-
-

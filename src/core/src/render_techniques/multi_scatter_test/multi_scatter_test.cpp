@@ -104,7 +104,7 @@ DebugViewList MultiScatterTests::getDebugViews() const noexcept
 bool MultiScatterTests::init(CapsaicinInternal const &capsaicin) noexcept 
 {
 	/***** Perform any required initialisation operations here *****/
-	/*auto const                light_sampler = capsaicin.getComponent<LightSamplerSwitcher>();
+	auto const                light_sampler = capsaicin.getComponent<LightSamplerSwitcher>();
 	std::vector const         defines(light_sampler->getShaderDefines(capsaicin));
 	std::vector<char const *> base_defines;
 	base_defines.reserve(defines.size());
@@ -116,7 +116,7 @@ bool MultiScatterTests::init(CapsaicinInternal const &capsaicin) noexcept
 	{
 		base_defines.push_back("HAS_OCCLUSION");
 	}
-	auto const base_define_count = static_cast<uint32_t>(base_defines.size());*/
+	auto const base_define_count = static_cast<uint32_t>(base_defines.size());
 	// Programs (Capsaicin auto-loads .vert/.frag/.hlsl)
 	
 
@@ -130,7 +130,7 @@ bool MultiScatterTests::init(CapsaicinInternal const &capsaicin) noexcept
 	{
 		return false;
 	}
-	shadingKernel_ = gfxCreateGraphicsKernel(gfx_, shadingProgram_, shadeState);
+	shadingKernel_ = gfxCreateGraphicsKernel(gfx_, shadingProgram_, shadeState, "main", base_defines.data(), base_define_count);
 	assert(shadingKernel_);
 	frameCB_ = gfxCreateBuffer(capsaicin.getGfx(), sizeof(FrameCBData), nullptr, kGfxCpuAccess_Write);
 	frameCB_.setStride(sizeof(FrameCBData));
@@ -230,7 +230,9 @@ void MultiScatterTests::render([[maybe_unused]] CapsaicinInternal &capsaicin) no
 	gfxProgramSetParameter(gfx_, shadingProgram_, "g_InstanceBuffer", capsaicin.getInstanceBuffer());
 	gfxProgramSetParameter(gfx_, shadingProgram_, "g_MaterialBuffer", capsaicin.getMaterialBuffer());
 	gfxProgramSetParameter(gfx_, shadingProgram_, "g_TransformBuffer", capsaicin.getTransformBuffer());
+
 	light_sampler->addProgramParameters(capsaicin, shadingProgram_);
+
 	gfxProgramSetParameter(gfx_, shadingProgram_, "g_EnvironmentBuffer", capsaicin.getEnvironmentBuffer());
 
 	//prefilter_ibl->addProgramParameters(capsaicin, shadingProgram_);
@@ -241,14 +243,14 @@ void MultiScatterTests::render([[maybe_unused]] CapsaicinInternal &capsaicin) no
 	gfxProgramSetParameter(gfx_, shadingProgram_, "g_NearestSampler", capsaicin.getNearestSampler());
 	gfxProgramSetParameter(gfx_, shadingProgram_, "g_LinearSampler", capsaicin.getLinearSampler());
 	gfxProgramSetParameter(gfx_, shadingProgram_, "g_TextureSampler", capsaicin.getLinearSampler());
-    if (capsaicin.getCurrentDebugView() == "DirectLighting")
-    {
-        gfxCommandSetViewport(gfx_, 0.0f, 0.0f, (float)dim.x, (float)dim.y);
-        gfxCommandSetScissorRect(gfx_, 0, 0, (int32_t)dim.x, (int32_t)dim.y);
-        gfxCommandBindColorTarget(gfx_, 0, capsaicin.getSharedTexture("Debug"));
-        gfxCommandBindKernel(gfx_, shadingKernel_);
-        gfxCommandDraw(gfx_, 3);
-    }
+	if (capsaicin.getCurrentDebugView() == "DirectLighting")
+	{
+		gfxCommandSetViewport(gfx_, 0.0f, 0.0f, (float)dim.x, (float)dim.y);
+		gfxCommandSetScissorRect(gfx_, 0, 0, (int32_t)dim.x, (int32_t)dim.y);
+		gfxCommandBindColorTarget(gfx_, 0, capsaicin.getSharedTexture("Debug"));
+		gfxCommandBindKernel(gfx_, shadingKernel_);
+		gfxCommandDraw(gfx_, 3);
+	}
 	gfxCommandBindColorTarget(gfx_, 0, capsaicin.getSharedTexture("DirectLighting"));
 	gfxCommandBindKernel(gfx_, shadingKernel_);
 	gfxCommandDraw(gfx_, 3);

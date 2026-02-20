@@ -21,7 +21,7 @@ public:
 		int       brdf_model;
 		int       pad0, pad1, pad2; // padding to 16‑byte alignment
 		glm::mat4 view_proj_inv;
-        glm::mat4 view_proj;
+		glm::mat4 view_proj;
 	};
 
 	struct RenderOptions
