@@ -95,8 +95,8 @@ float4 main(float4 pos : SV_Position) : SV_Target0
 	float3 totalLighting = 0.0f;
 	uint lightCount = getNumberLights();
 	// Skip lighting calculations if there are only area lights, as they require special handling (sampling the light source geometry or monte carlo integration) that is not implemented in this shader (needs ib and vb access) Also really expensive to evaluate and not common in real time scenes, so better to just skip for now
-	if (getNumberLights() == getNumberAreaLights()) 
-		return float4(0, 0, 0, 1);
+	//if (getNumberLights() == getNumberAreaLights()) 
+		//return float4(0, 0, 0, 1);
 	for (uint i = 0; i < lightCount; i++)
 	{
 	
@@ -149,10 +149,10 @@ float4 main(float4 pos : SV_Position) : SV_Target0
 		
 		totalLighting += f * radiance * NdotL;
 	}
-	
-	
-		
-	return float4(totalLighting, 1.0f);
-
-	
+    uint albedoTex = asuint(material.albedo.w);
+    float3 dbg = g_TextureMaps[NonUniformResourceIndex(albedoTex)].SampleLevel(g_TextureSampler, meshUV, 0).xyz;
+    //return float4(meshUV,0,1);
+    return float4(totalLighting, 1);
+    //return visibility;
+    //return float4(primitiveID / 255, 0, 0, 1);
 }

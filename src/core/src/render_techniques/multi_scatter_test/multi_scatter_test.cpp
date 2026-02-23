@@ -2,6 +2,7 @@
 #include "capsaicin_internal.h"
 #include "components/blue_noise_sampler/blue_noise_sampler.h"
 #include "components/brdf_lut/brdf_lut.h"
+#include "components/light_builder/light_builder.h"
 #include "components/light_sampler/light_sampler_switcher.h"
 #include "components/prefilter_ibl/prefilter_ibl.h"
 #include "components/random_number_generator/random_number_generator.h"
@@ -51,6 +52,7 @@ ComponentList MultiScatterTests::getComponents() const noexcept
 	/***** Example: if corresponding header is already included (using provided helper COMPONENT_MAKE):
 	 * *****/
 	/*****  components.emplace_back(COMPONENT_MAKE(TypeOfComponent)); *****/
+	components.emplace_back(COMPONENT_MAKE(LightBuilder));
 	components.emplace_back(COMPONENT_MAKE(LightSamplerSwitcher));
 	components.emplace_back(COMPONENT_MAKE(RandomNumberGenerator));
 	components.emplace_back(COMPONENT_MAKE(BrdfLut));
@@ -104,6 +106,9 @@ DebugViewList MultiScatterTests::getDebugViews() const noexcept
 bool MultiScatterTests::init(CapsaicinInternal const &capsaicin) noexcept 
 {
 	/***** Perform any required initialisation operations here *****/
+	auto &caps = const_cast<CapsaicinInternal &>(capsaicin);
+	caps.setOption<bool>("area_light_enable", false);
+
 	auto const                light_sampler = capsaicin.getComponent<LightSamplerSwitcher>();
 	std::vector const         defines(light_sampler->getShaderDefines(capsaicin));
 	std::vector<char const *> base_defines;
@@ -116,10 +121,17 @@ bool MultiScatterTests::init(CapsaicinInternal const &capsaicin) noexcept
 	{
 		base_defines.push_back("HAS_OCCLUSION");
 	}
-	auto const base_define_count = static_cast<uint32_t>(base_defines.size());
-	// Programs (Capsaicin auto-loads .vert/.frag/.hlsl)
+	auto lightBuilder = capsaicin.getComponent<LightBuilder>();
 	
+	GFX_PRINTLN("Lights in scene: p %u, s %u, d %u, e %u, a %u", lightBuilder->getPointLightCount(),
+        lightBuilder->getSpotLightCount(), lightBuilder->getDirectionalLightCount(),
+        lightBuilder->getEnvironmentLightCount(), lightBuilder->getAreaLightCount());
+	GFX_PRINTLN("Lights in scene:  %u, ", lightBuilder->getLightCount());
+	GFX_PRINTLN("Lights in scene: delta %u, ", lightBuilder->getDeltaLightCount());
+    
+	auto const base_define_count = static_cast<uint32_t>(base_defines.size());
 
+	
 	// Shading draw state (fullscreen)
 	GfxDrawState shadeState;
 	//gfxDrawStateSetDepthStencilTarget(shadeState, capsaicin.getSharedTexture("Depth").getFormat());
@@ -134,6 +146,10 @@ bool MultiScatterTests::init(CapsaicinInternal const &capsaicin) noexcept
 	assert(shadingKernel_);
 	frameCB_ = gfxCreateBuffer(capsaicin.getGfx(), sizeof(FrameCBData), nullptr, kGfxCpuAccess_Write);
 	frameCB_.setStride(sizeof(FrameCBData));
+	int MAX_LIGHTS = 32;
+	lightBuffer_ =
+		gfxCreateBuffer(capsaicin.getGfx(), sizeof(GfxLight) * MAX_LIGHTS, nullptr, kGfxCpuAccess_Write);
+	lightBuffer_.setStride(sizeof(GfxLight));
 	//auto depth = capsaicin.getSharedTexture("Depth");
 	auto color = capsaicin.getSharedTexture("DirectLighting");
 	//assert(depth);
@@ -178,7 +194,19 @@ void MultiScatterTests::render([[maybe_unused]] CapsaicinInternal &capsaicin) no
 
 		ptr->view_proj_inv = cam.inv_view_projection;
 	}
+	auto const *lights     = gfxSceneGetLights(capsaicin.getScene());
+	uint32_t    lightCount = gfxSceneGetLightCount(capsaicin.getScene());
 	
+
+	auto *gpuLights = gfxBufferGetData<GfxLight>(gfx_, lightBuffer_);
+
+	for (uint32_t i = 0; i < lightCount; ++i)
+	{
+		gpuLights[i] = lights[i];
+	}
+
+	
+
 	uint2 dim = capsaicin.getRenderDimensions();
 	auto const &camera = capsaicin.getCamera();
 	float const near_far[] = {camera.nearZ, camera.farZ};
@@ -193,7 +221,6 @@ void MultiScatterTests::render([[maybe_unused]] CapsaicinInternal &capsaicin) no
 	
 	gfxCommandSetViewport(gfx_, 0.0f, 0.0f, (float)dim.x, (float)dim.y);
 	gfxCommandSetScissorRect(gfx_, 0, 0, (int32_t)dim.x, (int32_t)dim.y);
-	
 	gfxProgramSetParameter(gfx_, shadingProgram_, "FrameCB", frameCB_);
 	gfxProgramSetParameter(gfx_, shadingProgram_, "g_BufferDimensions", dim);
 	gfxProgramSetParameter(gfx_, shadingProgram_, "g_Camera", capsaicin.getCamera());
@@ -221,6 +248,8 @@ void MultiScatterTests::render([[maybe_unused]] CapsaicinInternal &capsaicin) no
 	blue_noise_sampler->addProgramParameters(capsaicin, shadingProgram_);
 
 	//brdf_lut->addProgramParameters(capsaicin, shadingProgram_);
+	auto lightBuilder = capsaicin.getComponent<LightBuilder>();
+	lightBuilder->addProgramParameters(capsaicin, shadingProgram_);
 
 	rng->addProgramParameters(capsaicin, shadingProgram_);
 
@@ -242,7 +271,7 @@ void MultiScatterTests::render([[maybe_unused]] CapsaicinInternal &capsaicin) no
 
 	gfxProgramSetParameter(gfx_, shadingProgram_, "g_NearestSampler", capsaicin.getNearestSampler());
 	gfxProgramSetParameter(gfx_, shadingProgram_, "g_LinearSampler", capsaicin.getLinearSampler());
-	gfxProgramSetParameter(gfx_, shadingProgram_, "g_TextureSampler", capsaicin.getLinearSampler());
+    gfxProgramSetParameter(gfx_, shadingProgram_, "g_TextureSampler", capsaicin.getAnisotropicSampler());
 	if (capsaicin.getCurrentDebugView() == "DirectLighting")
 	{
 		gfxCommandSetViewport(gfx_, 0.0f, 0.0f, (float)dim.x, (float)dim.y);
