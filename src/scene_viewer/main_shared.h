@@ -129,7 +129,9 @@ protected:
      * Update render settings based on the currently set renderer.
      * @return Boolean signalling if no error occurred.
      */
-    [[nodiscard]] bool renderFrame() noexcept;
+    [[nodiscard]] bool    renderFrame() noexcept;
+    std::filesystem::path normalizePath(std::string const &filePath) noexcept;
+    std::filesystem::path OpenFileDialog(char const *filter);
 
     /**
      * Perform operations to display the default GUI.

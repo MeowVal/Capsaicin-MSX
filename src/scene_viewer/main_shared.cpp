@@ -1284,27 +1284,7 @@ bool CapsaicinMain::renderFrame() noexcept
     return true;
 }
 
-std::string OpenFileDialog(char const *filter)
-{
-    OPENFILENAMEA ofn;
-    CHAR          szFile[512] = {0};
 
-    ZeroMemory(&ofn, sizeof(ofn));
-    ofn.lStructSize  = sizeof(ofn);
-    ofn.hwndOwner    = nullptr;
-    ofn.lpstrFile    = szFile;
-    ofn.nMaxFile     = sizeof(szFile);
-    ofn.lpstrFilter  = filter;
-    ofn.nFilterIndex = 1;
-    ofn.Flags        = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
-
-    if (GetOpenFileNameA(&ofn) == TRUE)
-    {
-        return std::string(szFile);
-    }
-
-    return {};
-}
 
 bool CapsaicinMain::renderGUI() noexcept
 {
@@ -1403,18 +1383,15 @@ bool CapsaicinMain::renderGUI() noexcept
                 }
                 if (ImGui::Button("Load External Scene…"))
                 {
-                    std::string path =
-                        OpenFileDialog("Scene files\0*.gltf;*.glb;*.obj;*.yaml\0All files\0*.*\0");
+                    std::filesystem::path path = OpenFileDialog("Scene files\0*.gltf;*.glb;*.obj;*.yaml\0"
+                                                                "All files\0*.*\0\0");
                     if (!path.empty())
                     {
-                        // Normalize slashes to match your existing logic
-                        std::ranges::replace(path, '\\', '/');
-
                         // Load scene (replace mode)
                         if (!loadScene(path, false))
                         {
                             MessageBoxA(nullptr, "Failed to open selected file (invalid or corrupted)",
-                                path.c_str(), MB_OK | MB_ICONEXCLAMATION | MB_TASKMODAL);
+                                path.string().c_str(), MB_OK | MB_ICONEXCLAMATION | MB_TASKMODAL);
                         }
                     }
                 }
@@ -2055,4 +2032,36 @@ void CapsaicinMain::fileDropCallback(char const *filePath, uint32_t const index,
     }
 }
 
+
+
+std::filesystem::path CapsaicinMain::OpenFileDialog(char const *filter)
+{
+    auto          oldCwd = std::filesystem::current_path();
+    OPENFILENAMEA ofn;
+    CHAR          szFile[512] = {0};
+
+    ZeroMemory(&ofn, sizeof(ofn));
+    ofn.lStructSize  = sizeof(ofn);
+    ofn.hwndOwner    = nullptr;
+    ofn.lpstrFile    = szFile;
+    ofn.nMaxFile     = sizeof(szFile);
+    ofn.lpstrFilter  = filter;
+    ofn.nFilterIndex = 1;
+    ofn.Flags        = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
+
+    std::filesystem::path result;
+    if (GetOpenFileNameA(&ofn) == TRUE)
+    {
+        error_code ec;
+        auto       newPath       = filesystem::proximate(szFile, oldCwd, ec);
+        string     convertString = newPath.string();
+        // Must convert path separate to portable form, so it will match our pre-existing list.
+        ranges::replace(convertString, '\\', '/');
+        newPath = convertString;
+        result  = newPath;
+        
+    }
+    std::filesystem::current_path(oldCwd);
+    return result;
+}
 

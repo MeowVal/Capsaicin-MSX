@@ -152,6 +152,7 @@ float4 main(float4 pos : SV_Position) : SV_Target0
     uint albedoTex = asuint(material.albedo.w);
     float3 dbg = g_TextureMaps[NonUniformResourceIndex(albedoTex)].SampleLevel(g_TextureSampler, meshUV, 0).xyz;
     //return float4(meshUV,0,1);
+    //return float4(dbg, 1);
     return float4(totalLighting, 1);
     //return visibility;
     //return float4(primitiveID / 255, 0, 0, 1);

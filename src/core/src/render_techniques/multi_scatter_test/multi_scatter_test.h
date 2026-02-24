@@ -1,6 +1,7 @@
 #pragma once
 
 #include "render_technique.h"
+#include "components/light_sampler_grid_cdf/light_sampler_grid_cdf.h"
 
 namespace Capsaicin
 {
@@ -100,7 +101,8 @@ protected:
 	GfxProgram    shadingProgram_; // fullscreen BRDF shading
 	GfxKernel     shadingKernel_;  // if you run it as a compute/fullscreen kernel
 	GfxBuffer     frameCB_;        // constant/uniform buffer for options + frame data
-    GfxBuffer        lightBuffer_;
+    GfxRef<GfxLight> sun_;
+    float            time_ = 0.0f;
 	std::string_view debug_view_;
 	GfxTexture       depth_buffer_;
 	GfxTexture       irradiance_buffer_;
