@@ -77,8 +77,7 @@ float3 Fast_MSX(float3 N, float3 V, float3 L, float3 albedo, float rough, float 
 
     float CosVC = saturate(dot(V, C));
     float ThetaVC = acos(CosVC);
-    float ThetaHL = acos(saturate(dot(V, L)));
-    float ThetaM = (PI - ThetaHL) * 0.25;
+    float ThetaM = (PI - acos(saturate(dot(V, L)))) * 0.25;
 
     if (NdotL <= 0.0 || NdotV <= 0.0)
         return float3(0.0, 0.0, 0.0);
@@ -121,9 +120,68 @@ float3 Fast_MSX(float3 N, float3 V, float3 L, float3 albedo, float rough, float 
 
     return diff + spec;
 }
+float Luminance(float3 c)
+{
+    return dot(c, float3(0.2126, 0.7152, 0.0722));
+}
+float Ess_Approx(float rough, float3 f0)
+{
+    float a = rough * rough;
+    float F0_lum = Luminance(f0); // Base term: smoother surfaces keep more energy in single scattering 
+
+    float Ess = 1.0 - a * (0.6 + 0.4 * F0_lum); 
+    return saturate(Ess); 
+}
 
 float3 Heitz(float3 N, float3 V, float3 L, float3 albedo, float rough, float metal)
 {
-    return albedo * 0.6f;
+    float3 H = normalize(V + L);
+
+    float NdotV = saturate(dot(N, V));
+    float NdotL = saturate(dot(N, L));
+    float NdotH = saturate(dot(N, H));
+    float VdotH = saturate(dot(V, H));
+
+    if (NdotL <= 0.0 || NdotV <= 0.0)
+        return float3(0.0, 0.0, 0.0);
+
+    // --- F0 ---
+    float3 f0 = F0(albedo, metal);
+
+    // --- Fresnel (Schlick) ---
+    float3 F = Fresnel_Schlick(VdotH, f0);
+
+    // --- GGX NDF ---
+    float D = GGX_NDF(NdotH, rough);
+
+    // --- Smith GGX Geometry (Schlick-GGX) ---
+    float G = SchlickGGX(NdotV, NdotL, rough);
+
+    // --- Single-scattering specular (standard Cook-Torrance) ---
+    float3 spec_single = (D * G * F) / (4.0 * NdotL * NdotV + 1e-5);
+
+    // --- Heitz-style multiple scattering ---
+
+    // Directional-hemispherical single-scattering energy
+    float Ess = Ess_Approx(rough, f0);
+    float Ems = 1.0 - Ess; // energy left for multiple scattering
+
+    // Average Fresnel over microfacets (simple, cheap choice)
+    float3 Favg = f0;
+
+    // Broad multiple-scattering lobe (Lambert-like BRDF)
+    float3 spec_multi = Ems * Favg * (1.0 / PI);
+
+    // Per-light BRDF -> multiply by NdotL in your lighting loop
+    float3 spec = spec_single + spec_multi;
+
+    // --- Diffuse ---
+    // Energy-conserving diffuse for dielectrics.
+    // Metals (metal=1) naturally get no diffuse.
+    float3 kd = (1.0 - F) * (1.0 - metal);
+    float3 diff = kd * albedo * (1.0 / PI);
+
+    return diff + spec;
 }
+
 #endif
