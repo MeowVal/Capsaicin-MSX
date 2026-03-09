@@ -1,7 +1,7 @@
 #ifndef BRDF_MODELS_HLSL
 #define BRDF_MODELS_HLSL
 #include "math/math_constants.hlsl"
-
+#include "materials/material_evaluation.hlsl"
 
 
 float SchlickGGX(float NdotV, float NdotL, float rough)
@@ -15,7 +15,7 @@ float SchlickGGX(float NdotV, float NdotL, float rough)
 float GGX_NDF(float NdotH, float rough)
 {
     float a = rough;
-    float a2 = a * a;
+    float a2 = ClampAlphaRoughness(a * a);
     float denom = (NdotH * NdotH) * (a2 - 1.0) + 1.0;
     return a2 / (PI * denom * denom);
 }
@@ -26,12 +26,34 @@ float3 F0(float3 albedo, float metal)
 
 float3 Fresnel_Schlick(float VdotH, float3 F0)
 {
-    return F0 + (1.0 - F0) * pow(1.0 - VdotH, 5.0);
+    float3 F90 = 1.0f.xxx;
+    return F0 + (F90 - F0) * pow(1.0f - saturate(abs(VdotH)), 5.0f);
 }
 
-float3 Cook_Torrance(float3 N, float3 V, float3 L, float3 albedo, float rough, float metal)
+float G1_SmithGGX(float NdotX, float alpha)
+{
+    float a2 = ClampAlphaRoughness(alpha * alpha);
+    float cos2 = NdotX * NdotX;
+    float tan2 = (1.0 - cos2) / cos2;
+    return 2.0 / (1.0 + sqrt(1.0 + a2 * tan2));
+}
+
+float G_SmithGGX(float NdotV, float NdotL, float alpha)
+{
+    return G1_SmithGGX(NdotV, alpha) * G1_SmithGGX(NdotL, alpha);
+}
+
+float3 F0_from_IOR(float ior)
+{
+    float f = (ior - 1.0) / (ior + 1.0);
+    return float3(f * f, f * f, f * f);
+}
+
+
+float3 Cook_Torrance(float3 N, float3 V, float3 L, MaterialBRDF material)
 {
     float3 H = normalize(V + L);
+    float rough = material.roughnessAlpha;
 
     float NdotV = saturate(dot(N, V));
     float NdotL = saturate(dot(N, L));
@@ -42,7 +64,7 @@ float3 Cook_Torrance(float3 N, float3 V, float3 L, float3 albedo, float rough, f
         return float3(0.0, 0.0, 0.0);
 
     // --- F0 ---
-    float3 f0 = F0(albedo, metal);
+    float3 f0 = material.F0;
 
         // --- Fresnel (Schlick) ---
     float3 F = Fresnel_Schlick(VdotH, f0);
@@ -51,24 +73,25 @@ float3 Cook_Torrance(float3 N, float3 V, float3 L, float3 albedo, float rough, f
     float D = GGX_NDF(NdotH, rough);
 
     // --- Smith GGX Geometry (Schlick-GGX) ---
-    float G = SchlickGGX(NdotV, NdotL, rough);
+    float G = G_SmithGGX(NdotV, NdotL, rough);
 
 
     // --- Specular ---
     float3 spec = ((D * G * F) / (4.0 * NdotL * NdotV + 1e-5));
 
     // --- Diffuse (energy conserving) ---
-    float3 kd = (1.0 - F) * (1.0 - metal);
-    float3 diff = kd * albedo * (1.0 / PI);
+    float3 kd = (1.0f.xxx - F) * 1.05 * (1.0f - pow(1.0f - saturate(abs(VdotH)), 5.0f));
+    float3 diff = kd * material.albedo * INV_PI;
 
     return (diff + spec);
 }
 
-float3 Fast_MSX(float3 N, float3 V, float3 L, float3 albedo, float rough, float metal)
+float3 Fast_MSX(float3 N, float3 V, float3 L, MaterialBRDF material)
 {
 
     float3 H = normalize(V + L);
     float3 C = normalize(H + N);
+    float rough = material.roughnessAlpha;
 
     float NdotV = saturate(dot(N, V));
     float NdotL = saturate(dot(N, L));
@@ -83,7 +106,7 @@ float3 Fast_MSX(float3 N, float3 V, float3 L, float3 albedo, float rough, float 
         return float3(0.0, 0.0, 0.0);
 
     // --- F0 ---
-    float3 f0 = F0(albedo, metal);
+    float3 f0 = material.F0;
 
         // --- Fresnel (Schlick) ---
     float3 F = Fresnel_Schlick(VdotH, f0);
@@ -115,8 +138,8 @@ float3 Fast_MSX(float3 N, float3 V, float3 L, float3 albedo, float rough, float 
     float3 spec = FsE + FsI;
 
     // --- Diffuse (energy conserving) ---
-    float3 kd = (1.0 - F) * (1.0 - metal);
-    float3 diff = kd * albedo * (1.0 / PI);
+    float3 kd = (1.0f.xxx - F) * 1.05 * (1.0f - pow(1.0f - saturate(abs(VdotH)), 5.0f));
+    float3 diff = kd * material.albedo * INV_PI;
 
     return diff + spec;
 }
@@ -126,16 +149,17 @@ float Luminance(float3 c)
 }
 float Ess_Approx(float rough, float3 f0)
 {
-    float a = rough * rough;
+    float a = ClampAlphaRoughness(rough * rough);
     float F0_lum = Luminance(f0); // Base term: smoother surfaces keep more energy in single scattering 
 
     float Ess = 1.0 - a * (0.6 + 0.4 * F0_lum); 
     return saturate(Ess); 
 }
 
-float3 Heitz(float3 N, float3 V, float3 L, float3 albedo, float rough, float metal)
+float3 Heitz(float3 N, float3 V, float3 L, MaterialBRDF material)
 {
     float3 H = normalize(V + L);
+    float rough = material.roughnessAlpha;
 
     float NdotV = saturate(dot(N, V));
     float NdotL = saturate(dot(N, L));
@@ -146,7 +170,7 @@ float3 Heitz(float3 N, float3 V, float3 L, float3 albedo, float rough, float met
         return float3(0.0, 0.0, 0.0);
 
     // --- F0 ---
-    float3 f0 = F0(albedo, metal);
+    float3 f0 = material.F0;
 
     // --- Fresnel (Schlick) ---
     float3 F = Fresnel_Schlick(VdotH, f0);
@@ -170,7 +194,7 @@ float3 Heitz(float3 N, float3 V, float3 L, float3 albedo, float rough, float met
     float3 Favg = f0;
 
     // Broad multiple-scattering lobe (Lambert-like BRDF)
-    float3 spec_multi = Ems * Favg * (1.0 / PI);
+    float3 spec_multi = Ems * Favg * INV_PI;
 
     // Per-light BRDF -> multiply by NdotL in your lighting loop
     float3 spec = spec_single + spec_multi;
@@ -178,8 +202,8 @@ float3 Heitz(float3 N, float3 V, float3 L, float3 albedo, float rough, float met
     // --- Diffuse ---
     // Energy-conserving diffuse for dielectrics.
     // Metals (metal=1) naturally get no diffuse.
-    float3 kd = (1.0 - F) * (1.0 - metal);
-    float3 diff = kd * albedo * (1.0 / PI);
+    float3 kd = (1.0f.xxx - F) * 1.05 * (1.0f - pow(1.0f - saturate(abs(VdotH)), 5.0f));
+    float3 diff = kd * material.albedo * INV_PI;
 
     return diff + spec;
 }

@@ -141,11 +141,11 @@ float4 main(float4 pos : SV_Position) : SV_Target0
 		
 		float3 f;
 		if (g_BRDFModel == 0)
-			f = Cook_Torrance(N, V, L, me.albedo, me.roughness, me.metallicity);
+            f = Cook_Torrance(N, V, L, brdf);
 		else if (g_BRDFModel == 1)
-			f = Fast_MSX(N, V, L, me.albedo, me.roughness, me.metallicity);
+            f = Fast_MSX(N, V, L, brdf);
 		else
-			f = Heitz(N, V, L, me.albedo, me.roughness, me.metallicity);
+            f = Heitz(N, V, L, brdf);
 		
 		totalLighting += f * radiance * NdotL;
 	}
