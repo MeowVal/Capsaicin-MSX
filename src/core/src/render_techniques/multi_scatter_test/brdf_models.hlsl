@@ -3,7 +3,6 @@
 #include "math/math_constants.hlsl"
 #include "materials/material_evaluation.hlsl"
 
-
 float SchlickGGX(float NdotV, float NdotL, float rough)
 {
     float r = rough + 1.0;
@@ -207,5 +206,127 @@ float3 Heitz(float3 N, float3 V, float3 L, MaterialBRDF material)
 
     return diff + spec;
 }
+float P22_StudentT(float sx, float sy, float ax, float ay, float gamma)
+{
+    float num = gamma - 1.0;
+    float denom = (gamma - 1.0)
+                + (sx * sx) / (ax * ax)
+                + (sy * sy) / (ay * ay);
+
+    float base = num / denom;
+    return pow(base, gamma) / (PI * ax * ay);
+}
+float D_StudentT(float3 H_local, float ax, float ay, float gamma)
+{
+    float hz = H_local.z;
+    if (hz <= 0.0)
+        return 0.0;
+
+    float sx = H_local.x / hz;
+    float sy = H_local.y / hz;
+
+    float P = P22_StudentT(sx, sy, ax, ay, gamma);
+    return P / (hz * hz * hz);
+}
+float auxF(float u, float g)
+{
+    return atan(2.00141 - 1.6253863790572571 * g) *
+           sin(0.993127 * (-1.00658 + u -
+                (0.0209307 * (-2.63062 + g) * u) / (2.19417 + g)) * tan(u));
+}
+
+float auxF2(float x, float g)
+{
+    float u = x / sqrt(1.0 + x * x);
+    float num = auxF(u, g);
+    float den = 1.0 - u;
+    return 1.0 + 1.0 / max(1e-6, num / max(1e-6, den));
+}
+float roughness_i(float3 wi_local, float ax, float ay)
+{
+    // anisotropic effective roughness in direction wi
+    float wx = wi_local.x;
+    float wy = wi_local.y;
+    float wz = wi_local.z;
+
+    float proj = sqrt(wx * wx + wy * wy);
+    if (proj < 1e-6)
+        return ax; // arbitrary, direction near normal
+
+    float dirx = wx / proj;
+    float diry = wy / proj;
+
+    float a2 = ax * ax * dirx * dirx + ay * ay * diry * diry;
+    return sqrt(a2);
+}
+
+float G1_StudentT(float3 wi_local, float ax, float ay, float gamma)
+{
+    float u = wi_local.z; // cos(theta_i)
+    if (u > 0.9999)
+        return 1.0;
+    if (u <= 0.0)
+        return 0.0;
+
+    float a_i = roughness_i(wi_local, ax, ay);
+    float theta = acos(u);
+    float x = 1.0 / tan(theta) / max(1e-4, a_i);
+
+    return 0.5 * u * auxF2(x, gamma);
+}
+
+float G_StudentT(float3 V_local, float3 L_local,
+                 float ax, float ay, float gamma)
+{
+    float Gv = G1_StudentT(V_local, ax, ay, gamma);
+    float Gl = G1_StudentT(L_local, ax, ay, gamma);
+    return Gv * Gl;
+}
+float3 StudentT_BRDF( float3 N, float3 V, float3 L,
+    MaterialBRDF material)
+{
+    float3 H = normalize(V + L);
+    float gamma = 3.0; // tail heaviness parameter, controls the "sharpness" of the distribution's tails
+    float ax = material.roughnessAlpha; // isotropic
+    float ay = material.roughnessAlpha; // isotropic
+    float3 any = abs(N.z) < 0.999 ? float3(0, 0, 1) : float3(1, 0, 0);
+    float3 T = normalize(cross(any, N));
+    float3 B = cross(N, T);
+    float3 V_local = float3(dot(V, T), dot(V, B), dot(V, N));
+    float3 L_local = float3(dot(L, T), dot(L, B), dot(L, N));
+    float3 H_local = float3(dot(H, T), dot(H, B), dot(H, N));
+
+    float NdotV = saturate(dot(N, V));
+    float NdotL = saturate(dot(N, L));
+    float NdotH = saturate(dot(N, H));
+    float VdotH = saturate(dot(V, H));
+
+    if (NdotV <= 0.0 || NdotL <= 0.0)
+        return 0.0.xxx;
+    float3 F0 = material.F0;;
+    // Fresnel
+    float3 F = Fresnel_Schlick(VdotH, F0);
+
+    // NDF from P22
+    float D = D_StudentT(H_local, ax, ay, gamma);
+
+    // Geometry from sigma-approx G1
+    float G = G_StudentT(V_local, L_local, ax, ay, gamma);
+
+    float3 spec_single = (D * G * F) / (4.0 * NdotV * NdotL + 1e-5);
+
+    // you can reuse your Heitz MS term if you like
+    float rough_iso = 0.5 * (ax + ay);
+    float Ess = Ess_Approx(rough_iso, F0);
+    float Ems = 1.0 - Ess;
+    float3 spec_multi = Ems * F0 * INV_PI;
+
+    float3 kd = (1.0f.xxx - F) * 1.05 * (1.0f - pow(1.0f - saturate(abs(VdotH)), 5.0f));
+    float3 diff = kd * material.albedo * INV_PI;
+
+    return diff + spec_single + spec_multi;
+}
+
+
 
 #endif

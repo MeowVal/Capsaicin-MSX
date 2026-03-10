@@ -87,7 +87,6 @@ float4 main(float4 pos : SV_Position) : SV_Target0
 	Material material = g_MaterialBuffer[instance.material_index];
 	MaterialEvaluated me = MakeMaterialEvaluated(material, meshUV);
 	MaterialBRDF brdf = MakeMaterialBRDF(me);
-	
 
 	float3 V = normalize(g_Eye - worldPos);
 	
@@ -144,8 +143,10 @@ float4 main(float4 pos : SV_Position) : SV_Target0
             f = Cook_Torrance(N, V, L, brdf);
 		else if (g_BRDFModel == 1)
             f = Fast_MSX(N, V, L, brdf);
-		else
+        else if (g_BRDFModel == 2)
             f = Heitz(N, V, L, brdf);
+		else if (g_BRDFModel == 3)
+            f = StudentT_BRDF(N, V, L, brdf);
 		
 		totalLighting += f * radiance * NdotL;
 	}

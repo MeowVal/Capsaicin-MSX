@@ -306,7 +306,7 @@ void MultiScatterTests::renderGUI(CapsaicinInternal &capsaicin) const noexcept
 {
     /***** Add any UI drawing commands here                             *****/
     int model = options_.brdf_model;
-    if (ImGui::Combo("BRDF Model", &model, "CookTorrance\0Fast-MSX\0Heitz\0GGX\0"))
+    if (ImGui::Combo("BRDF Model", &model, "CookTorrance\0Fast-MSX\0Heitz\0StudentT\0"))
     {
         capsaicin.setOption("brdf_model", model);
     }
