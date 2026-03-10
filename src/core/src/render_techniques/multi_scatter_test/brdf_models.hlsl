@@ -315,7 +315,7 @@ float3 StudentT_BRDF( float3 N, float3 V, float3 L,
 
     float3 spec_single = (D * G * F) / (4.0 * NdotV * NdotL + 1e-5);
 
-    // you can reuse your Heitz MS term if you like
+    // reuse of Heitz MS term 
     float rough_iso = 0.5 * (ax + ay);
     float Ess = Ess_Approx(rough_iso, F0);
     float Ems = 1.0 - Ess;
