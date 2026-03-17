@@ -1,0 +1,6 @@
+{
+  "hlsl.additionalIncludeDirectories": [
+    "D:\\Capsaicin-MSX\\src\\core\\src",
+    "..\\render_techniques"
+  ]
+}
