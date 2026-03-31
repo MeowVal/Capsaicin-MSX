@@ -478,5 +478,51 @@ MaterialBRDF unpackMaterial(in uint packedMaterial)
 #endif
     return material;
 }
+struct MaterialSpectral
+{
+    float wavelength;
+    float n; // refractive index at λ
+    float k; // extinction coefficient at λ (metals)
+    float sigma_a; // absorption coefficient
+    float sigma_s; // scattering coefficient
+    float g; // phase function asymmetry
+    float reflectance; // surface reflectance at λ
+    float roughnessAlpha;
+    float roughnessAlphaSqr;
+   // bool isMetal;
+    //bool isParticipating;
+};
+
+float rgbToSpectrum(float3 rgb, float lambda)
+{
+    // Placeholder: simple luminance-weighted approximation
+    // Replace with Smits/Meng/PBRT spectral upsampling
+    return dot(rgb, float3(0.2126, 0.7152, 0.0722));
+}
+MaterialSpectral MakeMaterialSpectral(MaterialEvaluated material, float2 uv, float wavelength, float n_val, float k_val, float sigma_a_val, float sigma_s_val, float g_val)
+{
+    float3 rgb = material.albedo.xyz;
+    float3 F0 = lerp(0.04f.xxx, rgb, material.metallicity);
+    rgb *= (1.0f - material.metallicity);
+    float reflectance = rgbToSpectrum(rgb, wavelength);
+    float roughnessAlpha = ClampAlphaRoughness(ConvertPerceptualRoughnessToAlpha(material.roughness));
+    float roughnessAlphaSqr = ClampAlphaRoughness(roughnessAlpha * roughnessAlpha);
+    
+    MaterialSpectral ret =
+    {
+      
+      wavelength,
+      n_val,
+      k_val,
+      sigma_a_val,
+      sigma_s_val,
+      g_val,
+      reflectance,
+      roughnessAlpha,
+      roughnessAlphaSqr,
+    };
+    return ret;
+
+}
 
 #endif // MATERIALS_HLSL

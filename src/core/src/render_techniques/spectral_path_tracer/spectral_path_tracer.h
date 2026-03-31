@@ -28,16 +28,16 @@ THE SOFTWARE.
 
 namespace Capsaicin
 {
-class FastPT : public RenderTechnique
+class SpectralPT : public RenderTechnique
 {
 public:
-    FastPT();
-    ~FastPT() override;
+    SpectralPT();
+    ~SpectralPT() override;
 
-    FastPT(FastPT const &other)                = delete;
-    FastPT(FastPT &&other) noexcept            = delete;
-    FastPT &operator=(FastPT const &other)     = delete;
-    FastPT &operator=(FastPT &&other) noexcept = delete;
+    SpectralPT(SpectralPT const &other)                = delete;
+    SpectralPT(SpectralPT &&other) noexcept            = delete;
+    SpectralPT &operator=(SpectralPT const &other)     = delete;
+    SpectralPT &operator=(SpectralPT &&other) noexcept = delete;
 
     /*
      * Gets configuration options for current technique.
@@ -47,22 +47,22 @@ public:
 
     struct RenderOptions
     {
-        uint32_t fast_pt_bounce_count = 30; /**< Maximum number of bounces each path can take */
-        uint32_t fast_pt_min_rr_bounces =
+        uint32_t spectral_pt_bounce_count = 30; /**< Maximum number of bounces each path can take */
+        uint32_t spectral_pt_min_rr_bounces =
             2; /**< Number of bounces a path takes before Russian roulette can be used */
-        uint32_t fast_pt_sample_count = 1; /**< Number of paths to trace per pixel per frame */
-        bool     fast_pt_disable_albedo_materials =
+        uint32_t spectral_pt_sample_count = 1; /**< Number of paths to trace per pixel per frame */
+        bool     spectral_pt_disable_albedo_materials =
             false; /**< Sets material to fixed diffuse gray on first intersected surface */
-        bool fast_pt_disable_direct_lighting =
+        bool spectral_pt_disable_direct_lighting =
             false; /**< Disable sampling direct lighting on first intersection */
-        bool fast_pt_disable_specular_materials =
+        bool spectral_pt_disable_specular_materials =
             false; /**< Disable specular sampling/evaluation essentially setting materials to diffuse only */
-        bool fast_pt_disable_alpha_testing =
+        bool spectral_pt_disable_alpha_testing =
             false; /**< Disable testing material alpha - treats all surfaces as opaque */
-        bool fast_pt_nee_only    = false; /**< Disable light contributions from source other than NEE */
-        bool fast_pt_disable_nee = false; /**< Disable light contributions from Next Event Estimation */
-        bool fast_pt_use_dxr10   = false; /**< Use dxr 1.0 ray-tracing pipelines instead of inline rt */
-        bool fast_pt_accumulate  = true;  /**< Enable accumulation of frames */
+        bool spectral_pt_nee_only    = false; /**< Disable light contributions from source other than NEE */
+        bool spectral_pt_disable_nee = false; /**< Disable light contributions from Next Event Estimation */
+        bool spectral_pt_use_dxr10   = false; /**< Use dxr 1.0 ray-tracing pipelines instead of inline rt */
+        bool spectral_pt_accumulate  = true;  /**< Enable accumulation of frames */
     };
 
     /**
@@ -141,8 +141,8 @@ protected:
     RayCamera  cameraData;
     RenderOptions options;
 
-    GfxProgram fast_pt_program_;
-    GfxKernel  fast_pt_kernel_;
-    GfxSbt     fast_pt_sbt_;
+    GfxProgram spectral_pt_program_;
+    GfxKernel  spectral_pt_kernel_;
+    GfxSbt     spectral_pt_sbt_;
 };
 } // namespace Capsaicin

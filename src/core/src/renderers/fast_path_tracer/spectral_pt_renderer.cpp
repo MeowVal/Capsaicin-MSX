@@ -22,7 +22,7 @@ THE SOFTWARE.
 
 #include "auto_exposure/auto_exposure.h"
 #include "image_metrics/image_metrics.h"
-#include "fast_path_tracer/fast_path_tracer.h"
+#include "spectral_path_tracer/spectral_path_tracer.h"
 #include "renderer.h"
 #include "tone_mapping/tone_mapping.h"
 #include "variance_estimate/variance_estimate.h"
@@ -30,15 +30,15 @@ THE SOFTWARE.
 namespace Capsaicin
 {
 /** The path tracer renderer. */
-class FastPathTracer final
+class SpectralPathTracer final
     : public Renderer
-    , RendererFactory::Registrar<FastPathTracer>
+    , RendererFactory::Registrar<SpectralPathTracer>
 {
 public:
-    static constexpr std::string_view Name = "Fast Path Tracer";
+    static constexpr std::string_view Name = "Spectral Path Tracer";
 
     /** Constructor. */
-    FastPathTracer() noexcept // NOLINT(modernize-use-equals-default, hicpp-use-equals-default)
+    SpectralPathTracer() noexcept // NOLINT(modernize-use-equals-default, hicpp-use-equals-default)
     {}
 
     /**
@@ -51,7 +51,7 @@ public:
         [[maybe_unused]] RenderOptionList const &renderOptions) noexcept override
     {
         std::vector<std::unique_ptr<RenderTechnique>> render_techniques;
-        render_techniques.emplace_back(std::make_unique<ReferencePT>());
+        render_techniques.emplace_back(std::make_unique<SpectralPT>());
         render_techniques.emplace_back(std::make_unique<ImageMetrics>());
         render_techniques.emplace_back(std::make_unique<AutoExposure>());
         render_techniques.emplace_back(std::make_unique<ToneMapping>());

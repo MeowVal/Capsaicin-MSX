@@ -22,18 +22,18 @@ THE SOFTWARE.
 
 #define USE_INLINE_RT 0
 
-#include "reference_path_tracer.comp"
+#include "spectral_path_tracer.comp"
 #include "ray_tracing/path_tracing_rt.hlsl"
 
-TriangleHitGroup FastPTHitGroup =
+TriangleHitGroup SpectralPTHitGroup =
 {
-    "FastPTAnyHit", // AnyHit
-    "FastPTClosestHit", // ClosestHit
+    "SpectralPTAnyHit", // AnyHit
+    "SpectralPTClosestHit", // ClosestHit
 };
 
-TriangleHitGroup FastPTShadowHitGroup =
+TriangleHitGroup SpectralPTShadowHitGroup =
 {
-    "FastPTShadowAnyHit", // AnyHit
+    "SpectralPTShadowAnyHit", // AnyHit
     "", // ClosestHit
 };
 
@@ -49,26 +49,26 @@ RaytracingPipelineConfig MyPipelineConfig =
 };
 
 [shader("raygeneration")]
-void FastPTRaygen()
+void SpectralPTRaygen()
 {
     uint2 did = DispatchRaysIndex().xy;
     pathTracer(did, g_BufferDimensions);
 }
 
 [shader("anyhit")]
-void FastPTAnyHit(inout PathData path, in BuiltInTriangleIntersectionAttributes attr)
+void SpectralPTAnyHit(inout PathData path, in BuiltInTriangleIntersectionAttributes attr)
 {
     pathAnyHit(attr);
 }
 
 [shader("anyhit")]
-void FastPTShadowAnyHit(inout ShadowRayPayload payload, in BuiltInTriangleIntersectionAttributes attr)
+void SpectralPTShadowAnyHit(inout ShadowRayPayload payload, in BuiltInTriangleIntersectionAttributes attr)
 {
     pathShadowAnyHit(attr);
 }
 
 [shader("closesthit")]
-void FastPTClosestHit(inout PathData path, in BuiltInTriangleIntersectionAttributes attr)
+void SpectralPTClosestHit(inout PathData path, in BuiltInTriangleIntersectionAttributes attr)
 {
     // Setup configurable constants
     const uint minBounces = g_BounceRRCount; // Minimum bounces before early terminations are allowed
@@ -77,13 +77,13 @@ void FastPTClosestHit(inout PathData path, in BuiltInTriangleIntersectionAttribu
 }
 
 [shader("miss")]
-void FastPTMiss(inout PathData path)
+void SpectralPTMiss(inout PathData path)
 {
     pathMiss(path);
 }
 
 [shader("miss")]
-void FastPTShadowMiss(inout ShadowRayPayload payload)
+void SpectralPTShadowMiss(inout ShadowRayPayload payload)
 {
     // pathShadowMiss(payload); // Inline this to avoid invalid debug layer warnings
     payload.visible = true;

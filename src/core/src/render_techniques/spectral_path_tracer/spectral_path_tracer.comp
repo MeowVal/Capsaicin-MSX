@@ -135,7 +135,7 @@ void pathTracer(in uint2 pixel, in uint2 dimensions)
 
 #if USE_INLINE_RT
 [numthreads(4, 8, 1)]
-void ReferencePT(in uint2 did : SV_DispatchThreadID)
+void SpectralPT(in uint2 did : SV_DispatchThreadID)
 {
     pathTracer(did, g_BufferDimensions);
 }
