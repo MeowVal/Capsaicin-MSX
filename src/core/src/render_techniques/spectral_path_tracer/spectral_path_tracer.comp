@@ -24,6 +24,9 @@ THE SOFTWARE.
 #define USE_INLINE_RT 1
 #endif
 
+#define SPECTRAL_MODE          1
+#define USE_CUSTOM_HIT_FUNCTIONS
+#define USE_CUSTOM_PATH_NEXT
 #include "ray_tracing/path_tracing_shared.h"
 
 uint2 g_BufferDimensions;
@@ -54,6 +57,9 @@ SamplerState g_TextureSampler; // Should be a linear sampler
 
 #include "components/light_sampler/light_sampler.hlsl"
 #include "ray_tracing/path_tracing.hlsl"
+#include "spectral.hlsl"
+
+
 
 /**
  * Calculate illumination information for a specific pixel
@@ -96,11 +102,15 @@ void pathTracer(in uint2 pixel, in uint2 dimensions)
 
         // Calculate primary ray
         RayInfo ray = generateCameraRay(newPixelRay, g_RayCamera);
+        
+        float lambda = sampleHeroWavelength(randomNG);
+        float3 rgbW = heroRGBWeight(lambda);
 
         float3 pathRadiance = 0.0f.xxx;
         traceFullPath(ray, randomStratified, randomNG, minBounces, maxBounces, pathRadiance);
 
         // Calculate running average of samples (Welfords online algorithm)
+        pathRadiance *= rgbW;
         radiance = radiance + ((pathRadiance - radiance) / (float)++sample);
     }
 

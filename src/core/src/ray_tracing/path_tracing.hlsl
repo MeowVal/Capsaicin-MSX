@@ -34,6 +34,7 @@ THE SOFTWARE.
 #include "lights/light_sampling.hlsl"
 #include "materials/material_sampling.hlsl"
 #include "math/transform.hlsl"
+#include "render_techniques/spectral_path_tracer/spectral.hlsl"
 
 #ifndef USE_INLINE_RT
 #   define USE_INLINE_RT 1
@@ -67,6 +68,12 @@ struct [raypayload] PathData
     float3 origin                      : read(caller)                   : write(closesthit); /**< Return value for new path segment start location */
     float3 direction                   : read(caller)                   : write(closesthit); /**< Return value for new path segment direction */
     bool terminated                    : read(caller)                   : write(closesthit, miss); /**< Return value to indicated current paths terminates */
+
+#if SPECTRAL_MODE
+    float  wavelength                  : read(closesthit, miss, caller) : write(caller, closesthit, miss);
+    float  T_lambda                    : read(closesthit, miss, caller) : write(caller, closesthit, miss);
+    float3 rgbWeight                   : read(closesthit, miss, caller) : write(caller, closesthit, miss);
+#endif
 };
 
 /**
@@ -89,6 +96,24 @@ void addRadiance(inout float3 radiance, float3 newRadiance, uint bounce)
 void addHitDistance(inout float3 radiance, float3 rayOrigin, float3 position)
 {
     // Nothing to do
+}
+
+template<typename RadianceT>
+void shadePathMissCustom(RayInfo ray, uint currentBounce, inout Random randomNG, float3 normal, float samplePDF, 
+    float3 throughput, inout RadianceT radiance)
+{
+#if !defined(DISABLE_NON_NEE) && !defined(DISABLE_ENVIRONMENT_LIGHTS)
+    if (hasEnvironmentLight())
+    {
+        LightEnvironment env = getEnvironmentLight();
+
+        // Evaluate environment in RGB (or spectral → RGB)
+        float3 envRGB = evaluateEnvironmentLight(env, ray.direction);
+
+        // In spectral mode, throughput already encodes T_lambda * rgbWeight
+        radiance += throughput * envRGB;
+    }
+#endif
 }
 
 /**
@@ -133,6 +158,25 @@ void shadePathMiss(RayInfo ray, uint currentBounce, inout Random randomNG, float
         }
     }
 #endif // !DISABLE_NON_NEE && !DISABLE_ENVIRONMENT_LIGHTS
+}
+
+template<typename RadianceT>
+void shadePathHitCustom(RayInfo ray, HitInfo hitData, IntersectData iData, inout Random randomNG, 
+    uint currentBounce, float3 normal, float samplePDF, float3 throughput, inout RadianceT radiance)
+{
+#if !defined(DISABLE_NON_NEE) && !defined(DISABLE_AREA_LIGHTS)
+    if (any(iData.material.emissivity.xyz > 0.0f))
+    {
+        float4 areaEmissivity = emissiveAlphaScaled(iData.material, iData.uv);
+        LightArea emissiveLight = MakeLightArea(
+            iData.vertex0, iData.vertex1, iData.vertex2,
+            areaEmissivity, iData.uv, iData.uv, iData.uv);
+
+        float3 lightRadiance = evaluateAreaLight(emissiveLight, 0.0f.xx);
+
+       radiance += throughput * lightRadiance;
+    }
+#endif
 }
 
 /**
@@ -189,6 +233,26 @@ void shadePathHit(RayInfo ray, HitInfo hitData, IntersectData iData, inout Rando
 #endif // !DISABLE_NON_NEE && !DISABLE_AREA_LIGHTS
 }
 
+template<typename RadianceT>
+void shadeLightHitCustom(RayInfo ray, MaterialBRDF material, uint currentBounce, float3 normal, float3 viewDirection, float3 throughput,
+    float lightPDF, float3 radianceLi, Light selectedLight, inout RadianceT radiance)
+{
+#if defined(DISABLE_NON_NEE) || (defined(DISABLE_AREA_LIGHTS) && defined(DISABLE_ENVIRONMENT_LIGHTS))
+    float3 sampleReflectance = evaluateBRDF(material, normal, viewDirection, ray.direction);
+    addRadiance(radiance, throughput * sampleReflectance * radianceLi / lightPDF, currentBounce);
+#else
+    // Evaluate BRDF for new light direction and calculate PDF for current sample
+    float3 sampleReflectance;
+    float samplePDF = sampleBRDFPDFAndEvalute(material, normal, viewDirection, ray.direction, sampleReflectance);
+    if (samplePDF != 0.0f)
+    {
+        bool deltaLight = isDeltaLight(selectedLight);
+        float weight = (!deltaLight) ? heuristicMIS(lightPDF, samplePDF) : 1.0f;
+        addRadiance(radiance, throughput * sampleReflectance * radianceLi * (weight / lightPDF), currentBounce);
+    }
+#endif // DISABLE_NON_NEE
+}
+
 /**
  * Calculate any radiance from a hit light.
  * @param ray               The traced ray that hit a surface.
@@ -231,6 +295,11 @@ void shadeLightHit(RayInfo ray, MaterialBRDF material, uint currentBounce, float
 #   define shadeLightHitFunc shadeLightHit
 #   define shadePathHitFunc shadePathHit
 #endif
+
+
+
+
+
 
 /**
  * Calculates a new light ray direction from a surface by sampling the scenes lighting.
@@ -326,6 +395,33 @@ void sampleLightsNEE(MaterialBRDF material, inout StratifiedSampler randomStrati
     }
 #endif // DISABLE_NEE
 }
+
+template<typename RadianceT>
+
+bool pathNextCustom(MaterialBRDF materialBRDF, inout StratifiedSampler randomStratified,
+    float3 position, float3 normal, float3 geometryNormal, float3 viewDirection, inout RadianceT radiance,
+    inout float3 throughput, out RayInfo ray, out float samplePDF)
+{
+    float3 sampleReflectance;
+    samplePDF = 0.0f;
+    float3 rayDirection = sampleBRDFAndEvaluate(
+        materialBRDF, randomStratified, normal, viewDirection,
+        sampleReflectance, samplePDF);
+
+    if (dot(geometryNormal, rayDirection) <= 0.0f || samplePDF == 0.0f)
+        return false;
+
+#if SPECTRAL_MODE
+    // Fold hero wavelength into throughput: T_lambda * rgbWeight baked into throughput
+    throughput *= sampleReflectance / samplePDF;
+#else
+    throughput *= sampleReflectance / samplePDF;
+#endif
+
+    ray = MakeRayInfoClosest(position, geometryNormal, rayDirection);
+    return true;
+}
+
 
 /**
  * Calculate the next segment along a path after a valid surface hit.
@@ -488,6 +584,10 @@ void tracePath(RayInfo ray, inout StratifiedSampler randomStratified, inout Rand
     pathData.terminated = false;
     pathData.randomNG = randomNG;
     pathData.randomStratified = randomStratified;
+
+    pathData.wavelength = sampleHeroWavelength(randomNG);
+    pathData.T_lambda   = 1.0f;
+    pathData.rgbWeight  = heroRGBWeight(pathData.wavelength);
 #endif
 
     for (uint bounce = currentBounce; bounce <= maxBounces; ++bounce)

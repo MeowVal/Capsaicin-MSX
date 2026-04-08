@@ -489,8 +489,6 @@ struct MaterialSpectral
     float reflectance; // surface reflectance at λ
     float roughnessAlpha;
     float roughnessAlphaSqr;
-   // bool isMetal;
-    //bool isParticipating;
 };
 
 float rgbToSpectrum(float3 rgb, float lambda)
@@ -499,11 +497,9 @@ float rgbToSpectrum(float3 rgb, float lambda)
     // Replace with Smits/Meng/PBRT spectral upsampling
     return dot(rgb, float3(0.2126, 0.7152, 0.0722));
 }
-MaterialSpectral MakeMaterialSpectral(MaterialEvaluated material, float2 uv, float wavelength, float n_val, float k_val, float sigma_a_val, float sigma_s_val, float g_val)
+MaterialSpectral MakeMaterialSpectral(MaterialEvaluated material, float wavelength, float n_val, float k_val, float sigma_a_val, float sigma_s_val, float g_val)
 {
     float3 rgb = material.albedo.xyz;
-    float3 F0 = lerp(0.04f.xxx, rgb, material.metallicity);
-    rgb *= (1.0f - material.metallicity);
     float reflectance = rgbToSpectrum(rgb, wavelength);
     float roughnessAlpha = ClampAlphaRoughness(ConvertPerceptualRoughnessToAlpha(material.roughness));
     float roughnessAlphaSqr = ClampAlphaRoughness(roughnessAlpha * roughnessAlpha);
