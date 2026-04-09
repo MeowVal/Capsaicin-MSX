@@ -103,15 +103,40 @@ void shadePathMissCustom(RayInfo ray, uint currentBounce, inout Random randomNG,
     float3 throughput, inout RadianceT radiance)
 {
 #if !defined(DISABLE_NON_NEE) && !defined(DISABLE_ENVIRONMENT_LIGHTS)
+#   if defined(DISABLE_DIRECT_LIGHTING)
+    if (currentBounce == 1) return;
+#   endif
     if (hasEnvironmentLight())
     {
         LightEnvironment env = getEnvironmentLight();
 
         // Evaluate environment in RGB (or spectral → RGB)
         float3 envRGB = evaluateEnvironmentLight(env, ray.direction);
+        //float L_lambda = evaluateEnvironmentSpectral(env, ray.direction, wavelength);
+        
 
-        // In spectral mode, throughput already encodes T_lambda * rgbWeight
-        radiance += throughput * envRGB;
+        #   if !defined(DISABLE_NEE)
+        if (currentBounce != 0)
+        {
+            // Account for light contribution along sampled direction
+            float lightPDF = sampleEnvironmentLightPDF(env, ray.direction, normal);
+            lightPDF *= sampleLightsPDF(randomNG, 0, ray.origin, normal);
+            if (lightPDF != 0.0f)
+            {
+                float weight = heuristicMIS(samplePDF, lightPDF);
+                radiance += throughput * envRGB * weight;
+                //radiance += throughput * (L_lambda * rgbWeight);
+            }
+        }
+        else
+#   endif // !DISABLE_NON_NEE
+        {
+            // In spectral mode, throughput already encodes T_lambda * rgbWeight
+            radiance += throughput * envRGB;
+            //radiance += throughput * (L_lambda * rgbWeight);
+        }
+
+        
     }
 #endif
 }
@@ -164,17 +189,45 @@ template<typename RadianceT>
 void shadePathHitCustom(RayInfo ray, HitInfo hitData, IntersectData iData, inout Random randomNG, 
     uint currentBounce, float3 normal, float samplePDF, float3 throughput, inout RadianceT radiance)
 {
+    if (currentBounce == 1)
+    {
+        addHitDistance(radiance, ray.origin, iData.position);
+#if defined(DISABLE_DIRECT_LIGHTING)
+        return;
+#endif
+    }
 #if !defined(DISABLE_NON_NEE) && !defined(DISABLE_AREA_LIGHTS)
     if (any(iData.material.emissivity.xyz > 0.0f))
     {
         float4 areaEmissivity = emissiveAlphaScaled(iData.material, iData.uv);
-        LightArea emissiveLight = MakeLightArea(
-            iData.vertex0, iData.vertex1, iData.vertex2,
+        LightArea emissiveLight = MakeLightArea(iData.vertex0, iData.vertex1, iData.vertex2, 
             areaEmissivity, iData.uv, iData.uv, iData.uv);
 
         float3 lightRadiance = evaluateAreaLight(emissiveLight, 0.0f.xx);
 
-       radiance += throughput * lightRadiance;
+        //float L_lambda = evaluateLightSpectral(light, wavelength);
+        //float3 weighted = L_lambda * rgbWeight;
+
+        #   if !defined(DISABLE_NEE)
+        if (currentBounce != 0)
+        {
+            // Account for light contribution along sampled direction
+            float lightPDF = sampleAreaLightPDF(emissiveLight, ray.origin, iData.position);
+            lightPDF *= sampleLightsPDF(randomNG, getAreaLightIndex(hitData.instanceIndex, hitData.primitiveIndex), ray.origin, normal);
+            if (lightPDF != 0.0f)
+            {
+                float weight = heuristicMIS(samplePDF, lightPDF);
+                radiance += throughput * lightRadiance * weight;
+            }
+        }
+        else
+#   endif // !DISABLE_NON_NEE
+        {
+            
+            //radiance += throughput * weighted;
+            radiance += throughput * lightRadiance;
+        }
+       
     }
 #endif
 }
@@ -397,22 +450,20 @@ void sampleLightsNEE(MaterialBRDF material, inout StratifiedSampler randomStrati
 }
 
 template<typename RadianceT>
-
 bool pathNextCustom(MaterialBRDF materialBRDF, inout StratifiedSampler randomStratified,
     float3 position, float3 normal, float3 geometryNormal, float3 viewDirection, inout RadianceT radiance,
     inout float3 throughput, out RayInfo ray, out float samplePDF)
 {
     float3 sampleReflectance;
     samplePDF = 0.0f;
-    float3 rayDirection = sampleBRDFAndEvaluate(
-        materialBRDF, randomStratified, normal, viewDirection,
-        sampleReflectance, samplePDF);
+    float3 rayDirection = sampleBRDFAndEvaluate(materialBRDF, randomStratified, normal, viewDirection, sampleReflectance, samplePDF);
 
     if (dot(geometryNormal, rayDirection) <= 0.0f || samplePDF == 0.0f)
         return false;
 
 #if SPECTRAL_MODE
-    // Fold hero wavelength into throughput: T_lambda * rgbWeight baked into throughput
+    //float f_lambda = evaluateBRDF_Spectral(materialBRDF, normal, viewDirection, rayDirection, wavelength);
+    //throughput *= f_lambda / samplePDF;
     throughput *= sampleReflectance / samplePDF;
 #else
     throughput *= sampleReflectance / samplePDF;
