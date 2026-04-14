@@ -39,6 +39,7 @@ std::vector<std::filesystem::path> const &CapsaicinInternal::getCurrentScenes() 
     return scene_files_;
 }
 
+
 bool CapsaicinInternal::setScene(std::filesystem::path const &fileName) noexcept
 {
     if (scene_files_.size() == 1 && scene_files_.front() == fileName)
@@ -1582,7 +1583,9 @@ void CapsaicinInternal::updateSceneMaterials() noexcept
             GfxMaterial const    *materials      = gfxSceneGetObjects<GfxMaterial>(scene_);
             uint32_t const        material_count = gfxSceneGetObjectCount<GfxMaterial>(scene_);
             std::vector<Material> material_data;
+            std::vector<uint32_t> mpml_index_data;
             material_data.reserve(material_count);
+            mpml_index_data.reserve(material_count);
 
             for (uint32_t i = 0; i < material_count; ++i)
             {
@@ -1608,14 +1611,27 @@ void CapsaicinInternal::updateSceneMaterials() noexcept
                 if (material_index >= material_data.size())
                 {
                     material_data.resize(static_cast<size_t>(material_index) + 1);
+                    mpml_index_data.resize(static_cast<size_t>(material_index) + 1);
                 }
 
                 material_data[material_index] = material;
+                uint32_t mpmlIndex            = 0; // default / fallback
+                auto     it                   = materialIndexToMpmlIndex_.find(material_index);
+                if (it != materialIndexToMpmlIndex_.end())
+                {
+                    mpmlIndex = it->second;
+                }
+
+                mpml_index_data[material_index] = mpmlIndex;
             }
 
             material_buffer_ = gfxCreateBuffer<Material>(
                 gfx_, static_cast<uint32_t>(material_data.size()), material_data.data());
             material_buffer_.setName("Capsaicin_MaterialBuffer");
+
+            mpml_material_index_buffer_ = gfxCreateBuffer<uint32_t>(
+                gfx_, static_cast<uint32_t>(mpml_index_data.size()), mpml_index_data.data());
+            mpml_material_index_buffer_.setName("Capsaicin_MPMLMaterialIndexBuffer");
 
             // Rebuild texture atlas for all used materials
             for (GfxTexture const &texture : texture_atlas_)

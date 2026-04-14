@@ -24,9 +24,10 @@ THE SOFTWARE.
 #define USE_INLINE_RT 1
 #endif
 
-#define SPECTRAL_MODE          1
-#define USE_CUSTOM_HIT_FUNCTIONS
-#define USE_CUSTOM_PATH_NEXT
+#define SPECTRAL_MODE            1
+#define USE_CUSTOM_HIT_PAYLOAD   1
+#define USE_CUSTOM_HIT_FUNCTIONS 1
+#define USE_CUSTOM_PATH_NEXT     1
 #include "ray_tracing/path_tracing_shared.h"
 
 uint2 g_BufferDimensions;
@@ -102,16 +103,15 @@ void pathTracer(in uint2 pixel, in uint2 dimensions)
 
         // Calculate primary ray
         RayInfo ray = generateCameraRay(newPixelRay, g_RayCamera);
-        
-        float lambda = sampleHeroWavelength(randomNG);
-        float3 rgbW = heroRGBWeight(lambda);
 
-        float3 pathRadiance = 0.0f.xxx;
-        traceFullPath(ray, randomStratified, randomNG, minBounces, maxBounces, pathRadiance);
+        pathPayload payload = (pathPayload) 0;
+
+        traceFullPath(ray, randomStratified, randomNG, minBounces, maxBounces, payload);
+        
+        float3 sampleRGB = payload.rgb;
 
         // Calculate running average of samples (Welfords online algorithm)
-        pathRadiance *= rgbW;
-        radiance = radiance + ((pathRadiance - radiance) / (float)++sample);
+        radiance = radiance + ((sampleRGB - radiance) / (float) ++sample);
     }
 
     // Check for incorrect calculations

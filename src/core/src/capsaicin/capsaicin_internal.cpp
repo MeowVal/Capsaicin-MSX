@@ -41,6 +41,7 @@ CapsaicinInternal::~CapsaicinInternal()
     terminate();
 }
 
+
 GfxContext CapsaicinInternal::getGfx() const
 {
     return gfx_;
@@ -562,6 +563,11 @@ GfxBuffer CapsaicinInternal::getPrevTransformBuffer() const
 GfxBuffer CapsaicinInternal::getMaterialBuffer() const
 {
     return material_buffer_;
+}
+
+GfxBuffer CapsaicinInternal::getMPMLMaterialIndexBuffer() const
+{
+    return mpml_material_index_buffer_;
 }
 
 vector<GfxTexture> const &CapsaicinInternal::getTextures() const
@@ -1356,6 +1362,7 @@ void CapsaicinInternal::terminate() noexcept
     gfxDestroyBuffer(gfx_, vertex_source_buffer_);
     gfxDestroyBuffer(gfx_, instance_buffer_);
     gfxDestroyBuffer(gfx_, material_buffer_);
+    gfxDestroyBuffer(gfx_, mpml_material_index_buffer_);
     gfxDestroyBuffer(gfx_, transform_buffer_);
     gfxDestroyBuffer(gfx_, instance_id_buffer_);
     gfxDestroyBuffer(gfx_, prev_transform_buffer_);

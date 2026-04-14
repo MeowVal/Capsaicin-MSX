@@ -662,6 +662,7 @@ public:
     [[nodiscard]] GfxBuffer getPrevTransformBuffer() const;
 
     [[nodiscard]] GfxBuffer getMaterialBuffer() const;
+    [[nodiscard]] GfxBuffer getMPMLMaterialIndexBuffer() const;
 
     [[nodiscard]] std::vector<GfxTexture> const &getTextures() const;
     [[nodiscard]] GfxSamplerState                getLinearSampler() const;
@@ -1095,6 +1096,8 @@ private:
     GfxBuffer                                    prev_transform_buffer_;
     bool                                         transform_updated_last_frame = false;
     GfxBuffer                                    material_buffer_;
+    GfxBuffer                                    mpml_material_index_buffer_;
+    std::unordered_map<uint32_t, uint32_t>       materialIndexToMpmlIndex_;
     std::vector<GfxTexture>                      texture_atlas_;
     GfxSamplerState                              linear_sampler_;
     GfxSamplerState                              linear_wrap_sampler_;

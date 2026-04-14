@@ -45,6 +45,14 @@ THE SOFTWARE.
  * However, if USE_CUSTOM_HIT_PAYLOAD is defined by any code including this header then instead
  * the payload will be the user supplied CustomPayLoad struct.
  */
+ struct CustomPayLoad
+{
+    float3 rgb;        // accumulated RGB radiance
+    float  wavelength; // hero λ for this path
+    float3 rgbWeight;  // w(λ)
+    float  T_lambda;   // scalar spectral throughput
+};
+
 #ifdef USE_CUSTOM_HIT_PAYLOAD
 typedef CustomPayLoad pathPayload;
 #else
@@ -68,12 +76,6 @@ struct [raypayload] PathData
     float3 origin                      : read(caller)                   : write(closesthit); /**< Return value for new path segment start location */
     float3 direction                   : read(caller)                   : write(closesthit); /**< Return value for new path segment direction */
     bool terminated                    : read(caller)                   : write(closesthit, miss); /**< Return value to indicated current paths terminates */
-
-#if SPECTRAL_MODE
-    float  wavelength                  : read(closesthit, miss, caller) : write(caller, closesthit, miss);
-    float  T_lambda                    : read(closesthit, miss, caller) : write(caller, closesthit, miss);
-    float3 rgbWeight                   : read(closesthit, miss, caller) : write(caller, closesthit, miss);
-#endif
 };
 
 /**
@@ -82,10 +84,15 @@ struct [raypayload] PathData
  * @param newRadiance       The new radiance to add.
  * @param bounce            The current bounce depth.
  */
+void addRadiance(inout CustomPayLoad radiance, float3 newRadiance, uint bounce)
+{
+    radiance.rgb += newRadiance;
+}
 void addRadiance(inout float3 radiance, float3 newRadiance, uint bounce)
 {
     radiance += newRadiance;
 }
+
 
 /**
  * Set the hit distance for a shaded path hit.
@@ -93,6 +100,10 @@ void addRadiance(inout float3 radiance, float3 newRadiance, uint bounce)
  * @param rayOrigin         The origin of the ray.
  * @param position          The position of the surface the ray hit.
  */
+void addHitDistance(inout CustomPayLoad radiance, float3 rayOrigin, float3 position)
+{
+    // Nothing to do
+}
 void addHitDistance(inout float3 radiance, float3 rayOrigin, float3 position)
 {
     // Nothing to do
@@ -185,6 +196,8 @@ void shadePathMiss(RayInfo ray, uint currentBounce, inout Random randomNG, float
 #endif // !DISABLE_NON_NEE && !DISABLE_ENVIRONMENT_LIGHTS
 }
 
+
+
 template<typename RadianceT>
 void shadePathHitCustom(RayInfo ray, HitInfo hitData, IntersectData iData, inout Random randomNG, 
     uint currentBounce, float3 normal, float samplePDF, float3 throughput, inout RadianceT radiance)
@@ -205,8 +218,9 @@ void shadePathHitCustom(RayInfo ray, HitInfo hitData, IntersectData iData, inout
 
         float3 lightRadiance = evaluateAreaLight(emissiveLight, 0.0f.xx);
 
-        //float L_lambda = evaluateLightSpectral(light, wavelength);
-        //float3 weighted = L_lambda * rgbWeight;
+
+        //float L_lambda = evaluateAreaLightSpectral(light, pathData.wavelength);
+        //float3 contrib = pathData.rgbWeight * pathData.T_lambda * L_lambda;
 
         #   if !defined(DISABLE_NEE)
         if (currentBounce != 0)
@@ -464,6 +478,7 @@ bool pathNextCustom(MaterialBRDF materialBRDF, inout StratifiedSampler randomStr
 #if SPECTRAL_MODE
     //float f_lambda = evaluateBRDF_Spectral(materialBRDF, normal, viewDirection, rayDirection, wavelength);
     //throughput *= f_lambda / samplePDF;
+    //pathData.T_lambda *= f_lambda / samplePDF;
     throughput *= sampleReflectance / samplePDF;
 #else
     throughput *= sampleReflectance / samplePDF;
@@ -629,16 +644,22 @@ void tracePath(RayInfo ray, inout StratifiedSampler randomStratified, inout Rand
     float samplePDF = 1.0f; // The PDF of the last sampled BRDF
 #else
     PathData pathData;
-    pathData.radiance = radiance;
     pathData.throughput = throughput;
     pathData.samplePDF = 1.0f;
     pathData.terminated = false;
     pathData.randomNG = randomNG;
     pathData.randomStratified = randomStratified;
+#if USE_CUSTOM_HIT_PAYLOAD
+    float lambda = sampleHeroWavelength(randomNG);
+    // spectral payload
+    pathData.radiance.rgb        = 0.0.xxx;
+    pathData.radiance.wavelength = lambda;
+    pathData.radiance.rgbWeight  = heroRGBWeight(lambda);
+    pathData.radiance.T_lambda   = 1.0f;
+#else
+    pathData.radiance = radiance;
+#endif
 
-    pathData.wavelength = sampleHeroWavelength(randomNG);
-    pathData.T_lambda   = 1.0f;
-    pathData.rgbWeight  = heroRGBWeight(pathData.wavelength);
 #endif
 
     for (uint bounce = currentBounce; bounce <= maxBounces; ++bounce)
@@ -699,5 +720,4 @@ void traceFullPath(RayInfo ray, inout StratifiedSampler randomStratified, inout 
 {
     tracePath(ray, randomStratified, randomNG, 0, minBounces, maxBounces, 0.0f.xxx, 1.0f.xxx, radiance);
 }
-
 #endif // PATH_TRACING_HLSL
