@@ -119,10 +119,16 @@ void shadePathMissCustom(RayInfo ray, uint currentBounce, inout Random randomNG,
 #   endif
     if (hasEnvironmentLight())
     {
-        LightEnvironment env = getEnvironmentLight();
+        LightEnvironment light = getEnvironmentLight();
 
         // Evaluate environment in RGB (or spectral → RGB)
-        float3 envRGB = evaluateEnvironmentLight(env, ray.direction);
+        float lambda = radiance.wavelength;
+        float3 rgbW = radiance.rgbWeight;
+        float  T_lambda = radiance.T_lambda;
+
+        //float L_lambda = evaluateAreaLightSpectral(light, lambda);
+        float3 L_lambda = evaluateEnvironmentLight(light, ray.direction);
+
         //float L_lambda = evaluateEnvironmentSpectral(env, ray.direction, wavelength);
         
 
@@ -130,12 +136,12 @@ void shadePathMissCustom(RayInfo ray, uint currentBounce, inout Random randomNG,
         if (currentBounce != 0)
         {
             // Account for light contribution along sampled direction
-            float lightPDF = sampleEnvironmentLightPDF(env, ray.direction, normal);
+            float lightPDF = sampleEnvironmentLightPDF(light, ray.direction, normal);
             lightPDF *= sampleLightsPDF(randomNG, 0, ray.origin, normal);
             if (lightPDF != 0.0f)
             {
                 float weight = heuristicMIS(samplePDF, lightPDF);
-                radiance += throughput * envRGB * weight;
+                radiance.rgb += rgbW * (T_lambda * L_lambda) * weight;
                 //radiance += throughput * (L_lambda * rgbWeight);
             }
         }
@@ -143,7 +149,7 @@ void shadePathMissCustom(RayInfo ray, uint currentBounce, inout Random randomNG,
 #   endif // !DISABLE_NON_NEE
         {
             // In spectral mode, throughput already encodes T_lambda * rgbWeight
-            radiance += throughput * envRGB;
+            radiance.rgb += rgbW * (T_lambda * L_lambda);
             //radiance += throughput * (L_lambda * rgbWeight);
         }
 
@@ -215,8 +221,12 @@ void shadePathHitCustom(RayInfo ray, HitInfo hitData, IntersectData iData, inout
         float4 areaEmissivity = emissiveAlphaScaled(iData.material, iData.uv);
         LightArea emissiveLight = MakeLightArea(iData.vertex0, iData.vertex1, iData.vertex2, 
             areaEmissivity, iData.uv, iData.uv, iData.uv);
+        float lambda = radiance.wavelength;
+        float3 rgbW = radiance.rgbWeight;
+        float  T_lambda = radiance.T_lambda;
 
-        float3 lightRadiance = evaluateAreaLight(emissiveLight, 0.0f.xx);
+        //float L_lambda = evaluateAreaLightSpectral(light, lambda);
+        float3 L_lambda = evaluateAreaLight(emissiveLight, 0.0f.xx);
 
 
         //float L_lambda = evaluateAreaLightSpectral(light, pathData.wavelength);
@@ -231,7 +241,7 @@ void shadePathHitCustom(RayInfo ray, HitInfo hitData, IntersectData iData, inout
             if (lightPDF != 0.0f)
             {
                 float weight = heuristicMIS(samplePDF, lightPDF);
-                radiance += throughput * lightRadiance * weight;
+                radiance.rgb += rgbW * (T_lambda * L_lambda) * weight;
             }
         }
         else
@@ -239,7 +249,7 @@ void shadePathHitCustom(RayInfo ray, HitInfo hitData, IntersectData iData, inout
         {
             
             //radiance += throughput * weighted;
-            radiance += throughput * lightRadiance;
+            radiance.rgb += rgbW * (T_lambda * L_lambda);
         }
        
     }
@@ -305,7 +315,7 @@ void shadeLightHitCustom(RayInfo ray, MaterialBRDF material, uint currentBounce,
     float lightPDF, float3 radianceLi, Light selectedLight, inout RadianceT radiance)
 {
 #if defined(DISABLE_NON_NEE) || (defined(DISABLE_AREA_LIGHTS) && defined(DISABLE_ENVIRONMENT_LIGHTS))
-    float3 sampleReflectance = evaluateBRDF(material, normal, viewDirection, ray.direction);
+    float3 sampleReflectance = evaluateBRDF_GGX(material, normal, viewDirection, ray.direction);
     addRadiance(radiance, throughput * sampleReflectance * radianceLi / lightPDF, currentBounce);
 #else
     // Evaluate BRDF for new light direction and calculate PDF for current sample
@@ -338,7 +348,7 @@ void shadeLightHit(RayInfo ray, MaterialBRDF material, uint currentBounce, float
     float lightPDF, float3 radianceLi, Light selectedLight, inout RadianceT radiance)
 {
 #if defined(DISABLE_NON_NEE) || (defined(DISABLE_AREA_LIGHTS) && defined(DISABLE_ENVIRONMENT_LIGHTS))
-    float3 sampleReflectance = evaluateBRDF(material, normal, viewDirection, ray.direction);
+    float3 sampleReflectance = evaluateBRDF_GGX(material, normal, viewDirection, ray.direction);
     addRadiance(radiance, throughput * sampleReflectance * radianceLi / lightPDF, currentBounce);
 #else
     // Evaluate BRDF for new light direction and calculate PDF for current sample
@@ -471,9 +481,18 @@ bool pathNextCustom(MaterialBRDF materialBRDF, inout StratifiedSampler randomStr
     float3 sampleReflectance;
     samplePDF = 0.0f;
     float3 rayDirection = sampleBRDFAndEvaluate(materialBRDF, randomStratified, normal, viewDirection, sampleReflectance, samplePDF);
+    float lambda = radiance.wavelength;
+    bool unused = false;
+    float f_lambda = sampleBRDFAndEvaluateSpectral(materialBRDF, randomStratified, normal, viewDirection, lambda, rayDirection, samplePDF, unused);
+
 
     if (dot(geometryNormal, rayDirection) <= 0.0f || samplePDF == 0.0f)
         return false;
+    
+
+
+    //radiance.T_lambda *= f_lambda / samplePDF;
+    //throughput *= f_lambda / samplePDF;   // still needed for MIS/RR
 
 #if SPECTRAL_MODE
     //float f_lambda = evaluateBRDF_Spectral(materialBRDF, normal, viewDirection, rayDirection, wavelength);
@@ -572,7 +591,7 @@ bool pathHit(inout RayInfo ray, HitInfo hitData, IntersectData iData, inout Stra
     //    return false;
     //}
 
-    MaterialBRDF materialBRDF = MakeMaterialBRDF(iData.material, iData.uv);
+    MaterialBRDF materialBRDF = MakeMaterialBRDF(iData.material, iData.uv, BRDF_GGX);
 #if defined(DISABLE_ALBEDO_MATERIAL)
     // Disable material albedo if requested
     if (currentBounce == 0)

@@ -25,6 +25,7 @@ THE SOFTWARE.
 
 #include "materials.hlsl"
 #include "math/math_constants.hlsl"
+#include "render_techniques/multi_scatter_test/brdf_models.hlsl"
 
 /**
  * Calculates schlick fresnel term.
@@ -168,7 +169,7 @@ float3 evaluateLambert(float3 albedo)
  * @param dotNV    The dot product of the normal and view direction (range [-1, 1]).
  * @return The calculated reflectance.
  */
-float3 evaluateBRDF(MaterialBRDF material, float dotHV, float dotNH, float dotNL, float dotNV)
+float3 evaluateBRDF_GGX(MaterialBRDF material, float dotHV, float dotNH, float dotNL, float dotNV)
 {
     // Calculate diffuse component
     float3 diffuse = evaluateLambert(material.albedo);
@@ -197,7 +198,7 @@ float3 evaluateBRDF(MaterialBRDF material, float dotHV, float dotNH, float dotNL
  * @param lightDirection The direction to the sampled light (must be normalised).
  * @return The calculated reflectance.
  */
-float3 evaluateBRDF(MaterialBRDF material, float3 normal, float3 viewDirection, float3 lightDirection)
+float3 evaluateBRDF_GGX(MaterialBRDF material, float3 normal, float3 viewDirection, float3 lightDirection)
 {
     // Calculate diffuse component
     float3 diffuse = evaluateLambert(material.albedo);
@@ -225,7 +226,26 @@ float3 evaluateBRDF(MaterialBRDF material, float3 normal, float3 viewDirection, 
 #endif
     return brdf;
 }
-
+float3 evaluateBRDF(MaterialBRDF material, float3 normal, float3 viewDirection, float3 lightDirection)
+{
+    switch (material.brdfType)
+    {
+    case BRDF_CookTorr: return Cook_Torrance(normal, viewDirection, lightDirection, material);
+    case BRDF_FastMSX:  return Fast_MSX(normal, viewDirection, lightDirection, material);
+    case BRDF_Heitz:    return Heitz(normal, viewDirection, lightDirection, material);
+    case BRDF_StudentT: return StudentT_BRDF(normal, viewDirection, lightDirection, material);
+    case BRDF_GGX:
+    default:
+        {
+            float3 H = normalize(viewDirection + lightDirection);
+            float dotHV = saturate(dot(H, viewDirection));
+            float dotNH = saturate(dot(normal, H));
+            float dotNL = saturate(dot(normal, lightDirection));
+            float dotNV = saturate(dot(normal, viewDirection));
+            return evaluateBRDF_GGX(material, dotHV, dotNH, dotNL, dotNV);
+        }
+    }
+}
 /**
  * Evaluate the BRDF for the diffuse and specular BRDF components separately.
  * @param material       Material data describing BRDF.

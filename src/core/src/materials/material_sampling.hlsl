@@ -27,7 +27,6 @@ THE SOFTWARE.
 #include "math/color.hlsl"
 #include "math/sampling.hlsl"
 #include "math/quaternion.hlsl"
-
 #define GGX_SAMPLE_VNDF         0  /**< Use Heitz full sphere VNDF sampling */
 #define GGX_SAMPLE_VNDF_UPPER   1  /**< Use Heitz upper hemisphere VNDF sampling */
 #define GGX_SAMPLE_VNDF_CAP     2  /**< Use Spherical Cap VNDF sampling */
@@ -192,6 +191,29 @@ float3 sampleGGX(float roughnessAlpha, float3 localView, float2 samples)
     float3 sampledLight = reflect(-localView, sampledNormal);
     return sampledLight;
 }
+float3 sampleStudentT(float alpha, float3 localView, float2 samples)
+{
+    // Student-T has no VNDF sampler, so we fall back to GGX VNDF sampling.
+    return sampleGGX(alpha, localView, samples);
+}
+float3 sampleSpecularDirection(MaterialBRDF material, float3 localView, float2 samples)
+{
+    switch (material.brdfType)
+    {
+        case BRDF_GGX:
+        case BRDF_CookTorr:
+        case BRDF_Heitz:
+        case BRDF_FastMSX:
+            return sampleGGX(material.roughnessAlpha, localView, samples);
+
+        case BRDF_StudentT:
+            return sampleStudentT(material.roughnessAlpha, localView, samples); // optional
+
+        default:
+            return sampleGGX(material.roughnessAlpha, localView, samples);
+    }
+}
+
 
 /**
  * Calculate the VNDF sampling PDF for given values for the GGX BRDF.
@@ -286,6 +308,26 @@ float3 calculateGGXSpecularDirection(float3 normal, float3 viewDirection, float 
     return normalize(lerp(normal, reflection, lerpFactor));
 }
 
+float3 estimateSpecularPeak(MaterialBRDF material, float3 normal, float3 viewDirection)
+{
+    switch (material.brdfType)
+    {
+        case BRDF_GGX:
+        case BRDF_CookTorr:
+        case BRDF_Heitz:
+        case BRDF_FastMSX:
+            // All GGX‑based models peak at mirror reflection
+            return reflect(-viewDirection, normal);
+
+        case BRDF_StudentT:
+            // Student‑T has a heavier tail → peak is still reflection
+            return reflect(-viewDirection, normal);
+
+        default:
+            return reflect(-viewDirection, normal);
+    }
+}
+
 /**
  * Calculate a sampled direction for the Lambert BRDF.
  * @note All calculations are done in the surfaces local tangent space.
@@ -335,6 +377,38 @@ float calculateBRDFProbability(float3 F0, float dotHV, float3 albedo)
     return probability;
 }
 
+float sampleStudentTPDF(float alpha, float gamma, float dotNH, float3 localView, float3 halfVector)
+{
+
+    float dotVH = saturate(dot(localView, halfVector));
+    if (dotVH <= 0.0 || dotNH <= 0.0) return 0.0;
+
+    float D  = D_StudentT(halfVector, alpha, gamma);
+    float G1 = G1_StudentT(localView, alpha, gamma);
+
+    // Microfacet reflection PDF
+    float pdf = (D * G1 * dotNH) / (4.0 * dotVH);
+
+    return pdf;
+}
+
+float samplePDF(MaterialBRDF material, float dotNH, float dotNV, float3 localView, float3 halfVector)
+{
+    switch (material.brdfType)
+    {
+        case BRDF_GGX:
+        case BRDF_CookTorr:
+        case BRDF_Heitz:
+        case BRDF_FastMSX:
+            return sampleGGXPDF(material.roughnessAlpha, material.roughnessAlphaSqr, dotNH, dotNV, localView);
+
+        case BRDF_StudentT:
+            return sampleStudentTPDF(material.roughnessAlpha, material.gamma, dotNH, localView, halfVector);
+
+        default:
+            return sampleGGXPDF(material.roughnessAlpha, material.roughnessAlphaSqr, dotNH, dotNV, localView);
+    }
+}
 /**
  * Calculate the PDF for given values for the combined BRDF.
  * @param material  Material data describing BRDF.
@@ -345,11 +419,11 @@ float calculateBRDFProbability(float3 F0, float dotHV, float3 albedo)
  * @param localView Outgoing ray view direction (in local space).
  * @return The calculated PDF.
  */
-float sampleBRDFPDF(MaterialBRDF material, float dotNH, float dotNL, float dotHV, float dotNV, float3 localView)
+float sampleBRDFPDF(MaterialBRDF material, float dotNH, float dotNL, float dotHV, float dotNV, float3 localView, float3 halfVector)
 {
 #ifndef DISABLE_SPECULAR_MATERIALS
     float probabilityBRDF = calculateBRDFProbability(material.F0, dotHV, material.albedo);
-    float pdf = lerp(sampleLambertPDF(dotNL), sampleGGXPDF(material.roughnessAlpha, material.roughnessAlphaSqr, dotNH, dotNV, localView), probabilityBRDF);
+    float pdf = lerp(sampleLambertPDF(dotNL), samplePDF(material, dotNH, dotNV, localView, halfVector), probabilityBRDF);
 #else
     float pdf = sampleLambertPDF(dotNL);
 #endif
@@ -385,8 +459,8 @@ float sampleBRDFPDF(MaterialBRDF material, float3 normal, float3 viewDirection, 
     float dotNV = clamp(localView.z, -1.0f, 1.0f);
 
     // Calculate combined PDF for current sample
-    // Note: has some duplicated calculations in evaluateBRDF and sampleBRDFPDF
-    float samplePDF = sampleBRDFPDF(material, dotNH, dotNL, specularDotHV, dotNV, localView);
+    // Note: has some duplicated calculations in evaluateBRDF_GGX and sampleBRDFPDF
+    float samplePDF = sampleBRDFPDF(material, dotNH, dotNL, specularDotHV, dotNV, localView, halfVector);
 #else
     // Calculate diffuse PDF for current sample
     float dotNL = clamp(dot(normal, lightDirection), -1.0f, 1.0f);
@@ -394,6 +468,8 @@ float sampleBRDFPDF(MaterialBRDF material, float3 normal, float3 viewDirection, 
 #endif
     return samplePDF;
 }
+
+
 
 /**
  * Calculate the PDF for given values for the combined BRDF when the sampling probability is already known.
@@ -405,10 +481,10 @@ float sampleBRDFPDF(MaterialBRDF material, float3 normal, float3 viewDirection, 
  * @param localView       Outgoing ray view direction (in local space).
  * @return The calculated PDF.
  */
-float sampleBRDFPDF2(MaterialBRDF material, float dotNH, float dotNL, float dotNV, float probabilityBRDF, float3 localView)
+float sampleBRDFPDF2(MaterialBRDF material, float dotNH, float dotNL, float dotNV, float probabilityBRDF, float3 localView, float3 halfVector)
 {
 #ifndef DISABLE_SPECULAR_MATERIALS
-    float pdf = lerp(sampleLambertPDF(dotNL), sampleGGXPDF(material.roughnessAlpha, material.roughnessAlphaSqr, dotNH, dotNV, localView), probabilityBRDF);
+    float pdf = lerp(sampleLambertPDF(dotNL), samplePDF(material, dotNH, dotNV, localView, halfVector), probabilityBRDF);
 #else
     float pdf = sampleLambertPDF(dotNL);
 #endif
@@ -441,7 +517,7 @@ float sampleBRDFPDFAndEvalute(MaterialBRDF material, float3 normal, float3 viewD
     float dotHV = saturate(dot(halfVector, localView));
     float dotNH = clamp(halfVector.z, -1.0f, 1.0f);
     float dotNV = clamp(localView.z, -1.0f, 1.0f);
-    reflectance = evaluateBRDF(material, dotHV, dotNH, dotNL, dotNV);
+    reflectance = evaluateBRDF(material, float3(0,0,1), localView, newLight);
 
     // Must use specular direction for H.V to match sampling functions
     float3 specularLightDirection = calculateGGXSpecularDirection(float3(0.0f, 0.0f, 1.0f), localView, sqrt(material.roughnessAlpha));
@@ -449,8 +525,8 @@ float sampleBRDFPDFAndEvalute(MaterialBRDF material, float3 normal, float3 viewD
     float specularDotHV = saturate(dot(specularHalfVector, localView));
 
     // Calculate combined PDF for current sample
-    // Note: has some duplicated calculations in evaluateBRDF and sampleBRDFPDF
-    float samplePDF = sampleBRDFPDF(material, dotNH, dotNL, specularDotHV, dotNV, localView);
+    // Note: has some duplicated calculations in evaluateBRDF_GGX and sampleBRDFPDF
+    float samplePDF = sampleBRDFPDF(material, dotNH, dotNL, specularDotHV, dotNV, localView, halfVector);
 #else
     // Calculate shading angles
     float dotNL = clamp(dot(normal, lightDirection), -1.0f, 1.0f);
@@ -500,8 +576,8 @@ float sampleBRDFPDFAndEvaluteSplit(MaterialBRDF material, float3 normal, float3 
     float specularDotHV = saturate(dot(specularHalfVector, localView));
 
     // Calculate combined PDF for current sample
-    // Note: has some duplicated calculations in evaluateBRDF and sampleBRDFPDF
-    float samplePDF = sampleBRDFPDF(material, dotNH, dotNL, specularDotHV, dotNV, localView);
+    // Note: has some duplicated calculations in evaluateBRDF_GGX and sampleBRDFPDF
+    float samplePDF = sampleBRDFPDF(material, dotNH, dotNL, specularDotHV, dotNV, localView, halfVector);
 #else
     // Calculate shading angles
     float dotNL = clamp(dot(normal, lightDirection), -1.0f, 1.0f);
@@ -550,7 +626,7 @@ float3 sampleBRDFAndEvaluateType(MaterialBRDF material, inout RNG randomNG, floa
     if (randomNG.rand() < probabilityBRDF)
     {
         // Sample specular BRDF component
-        newLight = sampleGGX(material.roughnessAlpha, localView, samples);
+        newLight = sampleSpecularDirection(material, localView, samples);
         specularSampled = true;
     }
     else
@@ -573,15 +649,15 @@ float3 sampleBRDFAndEvaluateType(MaterialBRDF material, inout RNG randomNG, floa
 #ifndef DISABLE_SPECULAR_MATERIALS
     float dotNH = clamp(halfVector.z, -1.0f, 1.0f);
     float dotNV = clamp(localView.z, -1.0f, 1.0f);
-    reflectance = evaluateBRDF(material, dotHV, dotNH, dotNL, dotNV);
+    reflectance = evaluateBRDF(material, float3(0,0,1), localView, newLight);
 #else
     reflectance = evaluateBRDFDiffuse(material, dotHV, dotNL);
 #endif
 
     // Calculate combined PDF for current sample
-    // Note: has some duplicated calculations in evaluateBRDF and sampleBRDFPDF
+    // Note: has some duplicated calculations in evaluateBRDF_GGX and sampleBRDFPDF
 #ifndef DISABLE_SPECULAR_MATERIALS
-    pdf = sampleBRDFPDF2(material, dotNH, dotNL, dotNV, probabilityBRDF, localView);
+    pdf = sampleBRDFPDF2(material, dotNH, dotNL, dotNV, probabilityBRDF, localView, halfVector);
 #else
     pdf = sampleLambertPDF(dotNL);
 #endif
@@ -642,7 +718,7 @@ float3 sampleBRDFType(MaterialBRDF material, inout RNG randomNG, float3 normal, 
     if (specularSampled)
     {
         // Sample specular BRDF component
-        newLight = sampleGGX(material.roughnessAlpha, localView, samples);
+        newLight = sampleSpecularDirection(material, localView, samples);
     }
     else
     {
@@ -664,7 +740,7 @@ float3 sampleBRDFType(MaterialBRDF material, inout RNG randomNG, float3 normal, 
 #ifndef DISABLE_SPECULAR_MATERIALS
     float dotNH = clamp(halfVector.z, -1.0f, 1.0f);
     float dotNV = clamp(localView.z, -1.0f, 1.0f);
-    pdf = sampleBRDFPDF2(material, dotNH, dotNL, dotNV, probabilityBRDF, localView);
+    pdf = sampleBRDFPDF2(material, dotNH, dotNL, dotNV, probabilityBRDF, localView, halfVector);
 #else
     pdf = sampleLambertPDF(dotNL);
 #endif
@@ -715,13 +791,13 @@ float sampleBRDFPDFAndEvaluateDiffuse(MaterialBRDF material, float3 normal, floa
 #ifndef DISABLE_SPECULAR_MATERIALS
     float dotNH = clamp(dot(normal, halfVector), -1.0f, 1.0f);
     float dotNV = clamp(dot(normal, viewDirection), -1.0f, 1.0f);
-    reflectance = evaluateBRDF(material, dotHV, dotNH, dotNL, dotNV);
+    reflectance = evaluateBRDF_GGX(material, dotHV, dotNH, dotNL, dotNV);
 #else
     reflectance = evaluateBRDFDiffuse(material, dotHV, dotNL);
 #endif
 
     // Calculate combined PDF for current sample
-    // Note: has some duplicated calculations in evaluateBRDF and sampleBRDFPDF
+    // Note: has some duplicated calculations in evaluateBRDF_GGX and sampleBRDFPDF
     float samplePDF = sampleLambertPDF(dotNL);
     return samplePDF;
 }
@@ -758,7 +834,7 @@ float3 sampleBRDFAndEvaluateDiffuse(MaterialBRDF material, inout RNG randomNG, f
 #ifndef DISABLE_SPECULAR_MATERIALS
     float dotNH = clamp(halfVector.z, -1.0f, 1.0f);
     float dotNV = clamp(localView.z, -1.0f, 1.0f);
-    reflectance = evaluateBRDF(material, dotHV, dotNH, dotNL, dotNV);
+    reflectance = evaluateBRDF(material, float3(0,0,1), localView, newLight);
 #else
     reflectance = evaluateBRDFDiffuse(material, dotHV, dotNL);
 #endif
@@ -831,7 +907,7 @@ float sampleBRDFPDFAndEvaluateSpecular(MaterialBRDF material, float3 normal, flo
     float dotHV = saturate(dot(halfVector, localView));
     float dotNH = clamp(halfVector.z, -1.0f, 1.0f);
     float dotNV = clamp(localView.z, -1.0f, 1.0f);
-    reflectance = evaluateBRDF(material, dotHV, dotNH, dotNL, dotNV);
+    reflectance = evaluateBRDF_GGX(material, dotHV, dotNH, dotNL, dotNV);
 
     // Calculate combined PDF for current sample
     // Note: has some duplicated calculations in evaluateBRDFSpecular and sampleGGXPDF
@@ -860,7 +936,7 @@ float3 sampleBRDFAndEvaluateSpecular(MaterialBRDF material, inout RNG randomNG, 
 
     // Sample specular BRDF component
     float2 samples = randomNG.rand2();
-    float3 newLight = sampleGGX(material.roughnessAlpha, localView, samples);
+    float3 newLight = sampleSpecularDirection(material, localView, samples);
 
     // Evaluate BRDF for new light direction
     float dotNL = clamp(newLight.z, -1.0f, 1.0f);
@@ -870,10 +946,10 @@ float3 sampleBRDFAndEvaluateSpecular(MaterialBRDF material, inout RNG randomNG, 
     float dotHV = saturate(dot(halfVector, localView));
     float dotNH = clamp(halfVector.z, -1.0f, 1.0f);
     float dotNV = clamp(localView.z, -1.0f, 1.0f);
-    reflectance = evaluateBRDF(material, dotHV, dotNH, dotNL, dotNV);
+    reflectance = evaluateBRDF(material, float3(0,0,1), localView, newLight);
 
     // Calculate combined PDF for current sample
-    // Note: has some duplicated calculations in evaluateBRDF and sampleBRDFPDF
+    // Note: has some duplicated calculations in evaluateBRDF_GGX and sampleBRDFPDF
     pdf = sampleGGXPDF(material.roughnessAlpha, material.roughnessAlphaSqr, dotNH, dotNV, localView);
 
     // Transform the new direction back into world space
@@ -900,7 +976,7 @@ float3 sampleBRDFSpecular(MaterialBRDF material, inout RNG randomNG, float3 norm
 
     // Sample specular BRDF component
     float2 samples = randomNG.rand2();
-    float3 newLight = sampleGGX(material.roughnessAlpha, localView, samples);
+    float3 newLight = sampleSpecularDirection(material, localView, samples);
 
     // Calculate half vector
     float3 halfVector = normalize(localView + newLight);

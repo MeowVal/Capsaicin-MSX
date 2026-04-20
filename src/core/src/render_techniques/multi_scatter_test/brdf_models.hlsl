@@ -206,28 +206,27 @@ float3 Heitz(float3 N, float3 V, float3 L, MaterialBRDF material)
 
     return diff + spec;
 }
-float P22_StudentT(float sx, float sy, float ax, float ay, float gamma)
+float P22_StudentT(float sx, float sy, float alpha, float gamma)
 {
+    float r2 = sx*sx + sy*sy; 
     float num = gamma - 1.0;
-    float denom = (gamma - 1.0)
-                + (sx * sx) / (ax * ax)
-                + (sy * sy) / (ay * ay);
+    float denom = (gamma - 1.0) + r2 / (alpha * alpha);
 
     float base = num / denom;
-    return pow(base, gamma) / (PI * ax * ay);
+    return pow(base, gamma) / (PI * alpha * alpha);
 }
-float D_StudentT(float3 H_local, float ax, float ay, float gamma)
+float D_StudentT(float3 H_local, float alpha, float gamma)
 {
     float hz = H_local.z;
-    if (hz <= 0.0)
-        return 0.0;
+    if (hz <= 0.0) return 0.0;
 
     float sx = H_local.x / hz;
     float sy = H_local.y / hz;
 
-    float P = P22_StudentT(sx, sy, ax, ay, gamma);
+    float P = P22_StudentT(sx, sy, alpha, gamma);
     return P / (hz * hz * hz);
 }
+
 float auxF(float u, float g)
 {
     return atan(2.00141 - 1.6253863790572571 * g) *
@@ -242,33 +241,18 @@ float auxF2(float x, float g)
     float den = 1.0 - u;
     return 1.0 + 1.0 / max(1e-6, num / max(1e-6, den));
 }
-float roughness_i(float3 wi_local, float ax, float ay)
+float roughness_i(float3 wi_local, float alpha)
 {
-    // anisotropic effective roughness in direction wi
-    float wx = wi_local.x;
-    float wy = wi_local.y;
-    float wz = wi_local.z;
-
-    float proj = sqrt(wx * wx + wy * wy);
-    if (proj < 1e-6)
-        return ax; // arbitrary, direction near normal
-
-    float dirx = wx / proj;
-    float diry = wy / proj;
-
-    float a2 = ax * ax * dirx * dirx + ay * ay * diry * diry;
-    return sqrt(a2);
+    return sqrt(alpha);
 }
 
-float G1_StudentT(float3 wi_local, float ax, float ay, float gamma)
+float G1_StudentT(float3 wi_local, float alpha, float gamma)
 {
     float u = wi_local.z; // cos(theta_i)
-    if (u > 0.9999)
-        return 1.0;
-    if (u <= 0.0)
-        return 0.0;
+    if (u > 0.9999) return 1.0;
+    if (u <= 0.0) return 0.0;
 
-    float a_i = roughness_i(wi_local, ax, ay);
+    float a_i = alpha; // isotropic
     float theta = acos(u);
     float x = 1.0 / tan(theta) / max(1e-4, a_i);
 
@@ -276,19 +260,18 @@ float G1_StudentT(float3 wi_local, float ax, float ay, float gamma)
 }
 
 float G_StudentT(float3 V_local, float3 L_local,
-                 float ax, float ay, float gamma)
+                 float alpha, float gamma)
 {
-    float Gv = G1_StudentT(V_local, ax, ay, gamma);
-    float Gl = G1_StudentT(L_local, ax, ay, gamma);
+    float Gv = G1_StudentT(V_local,alpha, gamma);
+    float Gl = G1_StudentT(L_local, alpha, gamma);
     return Gv * Gl;
 }
 float3 StudentT_BRDF( float3 N, float3 V, float3 L,
     MaterialBRDF material)
 {
     float3 H = normalize(V + L);
-    float gamma = 3.0; // tail heaviness parameter, controls the "sharpness" of the distribution's tails
-    float ax = material.roughnessAlpha; // isotropic
-    float ay = material.roughnessAlpha; // isotropic
+    material.gamma = 3.0; // tail heaviness parameter, controls the "sharpness of the distribution's tails
+    float alpha = material.roughnessAlpha; // isotropic
     float3 any = abs(N.z) < 0.999 ? float3(0, 0, 1) : float3(1, 0, 0);
     float3 T = normalize(cross(any, N));
     float3 B = cross(N, T);
@@ -308,15 +291,15 @@ float3 StudentT_BRDF( float3 N, float3 V, float3 L,
     float3 F = Fresnel_Schlick(VdotH, F0);
 
     // NDF from P22
-    float D = D_StudentT(H_local, ax, ay, gamma);
+    float D = D_StudentT(H_local, alpha, material.gamma);
 
     // Geometry from sigma-approx G1
-    float G = G_StudentT(V_local, L_local, ax, ay, gamma);
+    float G = G_StudentT(V_local, L_local, alpha, material.gamma);
 
     float3 spec_single = (D * G * F) / (4.0 * NdotV * NdotL + 1e-5);
 
     // reuse of Heitz MS term 
-    float rough_iso = 0.5 * (ax + ay);
+    float rough_iso = 0.5 * (alpha + alpha);
     float Ess = Ess_Approx(rough_iso, F0);
     float Ems = 1.0 - Ess;
     float3 spec_multi = Ems * F0 * INV_PI;
