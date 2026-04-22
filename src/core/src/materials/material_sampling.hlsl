@@ -317,14 +317,14 @@ float3 estimateSpecularPeak(MaterialBRDF material, float3 normal, float3 viewDir
         case BRDF_Heitz:
         case BRDF_FastMSX:
             // All GGX‑based models peak at mirror reflection
-            return reflect(-viewDirection, normal);
+            return calculateGGXSpecularDirection(normal, viewDirection, sqrt(material.roughnessAlpha));
 
         case BRDF_StudentT:
             // Student‑T has a heavier tail → peak is still reflection
             return reflect(-viewDirection, normal);
 
         default:
-            return reflect(-viewDirection, normal);
+            return calculateGGXSpecularDirection(normal, viewDirection, sqrt(material.roughnessAlpha));
     }
 }
 
@@ -447,7 +447,7 @@ float sampleBRDFPDF(MaterialBRDF material, float3 normal, float3 viewDirection, 
     float3 newLight = localRotation.transform(lightDirection);
 
     // Must use specular direction for H.V to match sampling functions
-    float3 specularLightDirection = calculateGGXSpecularDirection(float3(0.0f, 0.0f, 1.0f), localView, sqrt(material.roughnessAlpha));
+    float3 specularLightDirection = estimateSpecularPeak(material, float3(0.0f, 0.0f, 1.0f), localView);
     float3 specularHalfVector = normalize(localView + specularLightDirection);
     float specularDotHV = saturate(dot(specularHalfVector, localView));
 
@@ -520,7 +520,7 @@ float sampleBRDFPDFAndEvalute(MaterialBRDF material, float3 normal, float3 viewD
     reflectance = evaluateBRDF(material, float3(0,0,1), localView, newLight);
 
     // Must use specular direction for H.V to match sampling functions
-    float3 specularLightDirection = calculateGGXSpecularDirection(float3(0.0f, 0.0f, 1.0f), localView, sqrt(material.roughnessAlpha));
+    float3 specularLightDirection = estimateSpecularPeak(material, float3(0.0f, 0.0f, 1.0f), localView);
     float3 specularHalfVector = normalize(localView + specularLightDirection);
     float specularDotHV = saturate(dot(specularHalfVector, localView));
 
@@ -571,7 +571,7 @@ float sampleBRDFPDFAndEvaluteSplit(MaterialBRDF material, float3 normal, float3 
     evaluateBRDFSplit(material, dotHV, dotNH, dotNL, dotNV, reflectanceDiffuse, reflectanceSpecular);
 
     // Must use specular direction for H.V to match sampling functions
-    float3 specularLightDirection = calculateGGXSpecularDirection(float3(0.0f, 0.0f, 1.0f), localView, sqrt(material.roughnessAlpha));
+    float3 specularLightDirection = estimateSpecularPeak(material, float3(0.0f, 0.0f, 1.0f), localView);
     float3 specularHalfVector = normalize(localView + specularLightDirection);
     float specularDotHV = saturate(dot(specularHalfVector, localView));
 
@@ -617,7 +617,7 @@ float3 sampleBRDFAndEvaluateType(MaterialBRDF material, inout RNG randomNG, floa
     float3 newLight;
     float2 samples = randomNG.rand2();
 #ifndef DISABLE_SPECULAR_MATERIALS
-    float3 specularLightDirection = calculateGGXSpecularDirection(float3(0.0f, 0.0f, 1.0f), localView, sqrt(material.roughnessAlpha));
+    float3 specularLightDirection = estimateSpecularPeak(material, float3(0.0f, 0.0f, 1.0f), localView);
     float3 specularHalfVector = normalize(localView + specularLightDirection);
     // Calculate shading angles
     float specularDotHV = saturate(dot(specularHalfVector, localView));
@@ -709,7 +709,7 @@ float3 sampleBRDFType(MaterialBRDF material, inout RNG randomNG, float3 normal, 
     float3 newLight;
     float2 samples = randomNG.rand2();
 #ifndef DISABLE_SPECULAR_MATERIALS
-    float3 specularLightDirection = calculateGGXSpecularDirection(float3(0.0f, 0.0f, 1.0f), localView, sqrt(material.roughnessAlpha));
+    float3 specularLightDirection = estimateSpecularPeak(material, float3(0.0f, 0.0f, 1.0f), localView);
     float3 specularHalfVector = normalize(localView + specularLightDirection);
     // Calculate shading angles
     float specularDotHV = saturate(dot(specularHalfVector, localView));

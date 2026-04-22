@@ -135,8 +135,7 @@ struct Material
 {
     float4 albedo;     // .xyz = albedo, .w = albedo_map
     float4 emissivity; // .xyz = emissivity, .w = emissivity_map
-    float4
-        metallicity_roughness; // .x = metallicity, .y = metallicity_map, .z = roughness, .w = roughness_map
+    float4 metallicity_roughness; // .x = metallicity, .y = metallicity_map, .z = roughness, .w = roughness_map
     float4 normal_alpha_side;  // .x = normal_map, .y = alpha, .z = double sided, .w = alpha blend mode (0
                                // opaque, 1 clip, 2 blend)
 };

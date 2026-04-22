@@ -74,6 +74,34 @@ float3 evaluateAreaLight(LightArea light, float2 barycentric)
 #endif
 }
 
+float evaluateAreaLightSpectral(LightArea light, float2 barycentric, float lambda)
+{
+#ifndef DISABLE_AREA_LIGHTS
+    // Load RGB emissivity
+    float3 emissivity_rgb = light.emissivity.xyz;
+
+    // Optional emissivity texture
+    uint emissivityTex = asuint(light.emissivity.w);
+    if (emissivityTex != uint(-1))
+    {
+        float2 uv = interpolate(light.uv0, light.uv1, light.uv2, barycentric);
+        float4 tex = g_TextureMaps[NonUniformResourceIndex(emissivityTex)]
+                        .SampleLevel(g_TextureSampler, uv, 0.0f);
+
+        emissivity_rgb *= tex.xyz;
+        emissivity_rgb *= tex.w; // alpha modulation
+    }
+
+    // Convert RGB emissivity → scalar spectral emissivity
+    float emissivity_lambda = dot(emissivity_rgb, float3(0.2126, 0.7152, 0.0722));
+
+    return emissivity_lambda;
+#else
+    return 0.0f;
+#endif
+}
+
+
 /**
  * Get the emitted light from a given area light when using area sampling.
  * @param light        The light to be sampled.
@@ -282,6 +310,22 @@ float3 evaluateEnvironmentLight(LightEnvironment light, float3 direction)
     return 0.0f.xxx;
 #endif
 }
+
+float evaluateEnvironmentLightSpectral(LightEnvironment light, float3 direction, float lambda)
+{
+#ifndef DISABLE_ENVIRONMENT_LIGHTS
+    // Sample RGB environment map
+    float3 env_rgb = g_EnvironmentBuffer.SampleLevel(g_TextureSampler, direction, 0.0f).xyz;
+
+    // Convert RGB → scalar spectral radiance
+    float env_lambda = dot(env_rgb, float3(0.2126, 0.7152, 0.0722)); ///Rec.709 Luminance weights
+
+    return env_lambda;
+#else
+    return 0.0f;
+#endif
+}
+
 
 /**
  * Get lighting from the scene environment map within a ray cone.

@@ -17,10 +17,15 @@ float sampleHeroWavelength(inout Random rng)
 // Simple camera response → RGB weight; replace with your basis
 float3 heroRGBWeight(float lambda)
 {
-    // Placeholder: you’ll plug in your real basis / CMFs
-    // For now, just a dummy smooth function
-    float t = saturate((lambda - g_LambdaMin) / (g_LambdaMax - g_LambdaMin));
-    return normalize(float3(1.0f - t, t, 0.5f));
+    // Convert nm → normalized 0..1
+    float t = saturate((lambda - 380.0f) / (780.0f - 380.0f));
+
+    // Smooth overlapping lobes (approximate RGB sensitivity curves)
+    float r = exp(-0.5 * pow((t - 0.75) / 0.15, 2.0));
+    float g = exp(-0.5 * pow((t - 0.50) / 0.15, 2.0));
+    float b = exp(-0.5 * pow((t - 0.25) / 0.15, 2.0));
+
+    return float3(r, g, b);
 }
 
 float sampleMpmlReflectance(MaterialBRDF material, float lambda)
@@ -30,6 +35,56 @@ float sampleMpmlReflectance(MaterialBRDF material, float lambda)
     if (lambda < 500.0) return rgb.b;   // blue region
     if (lambda < 600.0) return rgb.g;   // green region
     return rgb.r;                       // red region
+}
+
+float sampleBRDFPDFAndEvaluteSpectral(MaterialBRDF material, float3 normal, float3 viewDirection,
+    float3 lightDirection, float lambda, out float reflectanceLambda)
+{
+#ifndef DISABLE_SPECULAR_MATERIALS
+    // Transform the view+light direction into the surfaces tangent coordinate space (oriented so that z axis is aligned to normal)
+    Quaternion localRotation = QuaternionRotationZ(normal);
+    float3 localView = localRotation.transform(viewDirection);
+    float3 newLight = localRotation.transform(lightDirection);
+
+    // Evaluate BRDF for input light direction
+    float dotNL = clamp(newLight.z, -1.0f, 1.0f);
+    // Calculate half vector
+    float3 halfVector = normalize(localView + newLight);
+    // Calculate shading angles
+    float dotHV = saturate(dot(halfVector, localView));
+    float dotNH = clamp(halfVector.z, -1.0f, 1.0f);
+    float dotNV = clamp(localView.z, -1.0f, 1.0f);
+
+    float3 f_rgb = evaluateBRDF(material, float3(0,0,1), localView, newLight);
+
+    float3 LUMA = float3(0.2126, 0.7152, 0.0722);
+    float R_lambda = sampleMpmlReflectance(material, lambda);
+    reflectanceLambda = dot(f_rgb, LUMA) * R_lambda;
+
+    // Must use specular direction for H.V to match sampling functions
+    float3 specularLightDirection = estimateSpecularPeak(material, float3(0.0f, 0.0f, 1.0f), localView);
+    float3 specularHalfVector = normalize(localView + specularLightDirection);
+    float specularDotHV = saturate(dot(specularHalfVector, localView));
+
+    // Calculate combined PDF for current sample
+    // Note: has some duplicated calculations in evaluateBRDF_GGX and sampleBRDFPDF
+    float samplePDF = sampleBRDFPDF(material, dotNH, dotNL, specularDotHV, dotNV, localView, halfVector);
+#else
+    // Calculate shading angles
+    float dotNL = clamp(dot(normal, lightDirection), -1.0f, 1.0f);
+    // Calculate half vector
+    float3 halfVector = normalize(viewDirection + lightDirection);
+    float dotHV = saturate(dot(halfVector, viewDirection));
+    float3 f_rgb = evaluateBRDFDiffuse(material, dotHV, dotNL);
+
+    float3 LUMA = float3(0.2126, 0.7152, 0.0722);
+    float R_lambda = sampleMpmlReflectance(material, lambda);
+    reflectance_lambda = dot(f_rgb, LUMA) * R_lambda;
+
+    // Calculate diffuse PDF for current sample
+    float samplePDF = sampleLambertPDF(dotNL);
+#endif
+    return samplePDF;
 }
 
 template<typename RNG>
@@ -44,7 +99,7 @@ float lambda, out float3 lightDirection, out float pdf, out bool specularSampled
     float3 newLight;
     float2 samples = randomNG.rand2();
 #ifndef DISABLE_SPECULAR_MATERIALS
-    float3 specularLightDirection = calculateGGXSpecularDirection(float3(0.0f, 0.0f, 1.0f), localView, sqrt(material.roughnessAlpha));
+    float3 specularLightDirection = estimateSpecularPeak(material, float3(0.0f, 0.0f, 1.0f), localView);
     float3 specularHalfVector = normalize(localView + specularLightDirection);
     // Calculate shading angles
     float specularDotHV = saturate(dot(specularHalfVector, localView));
