@@ -311,20 +311,7 @@ float3 evaluateEnvironmentLight(LightEnvironment light, float3 direction)
 #endif
 }
 
-float evaluateEnvironmentLightSpectral(LightEnvironment light, float3 direction, float lambda)
-{
-#ifndef DISABLE_ENVIRONMENT_LIGHTS
-    // Sample RGB environment map
-    float3 env_rgb = g_EnvironmentBuffer.SampleLevel(g_TextureSampler, direction, 0.0f).xyz;
 
-    // Convert RGB → scalar spectral radiance
-    float env_lambda = dot(env_rgb, float3(0.2126, 0.7152, 0.0722)); ///Rec.709 Luminance weights
-
-    return env_lambda;
-#else
-    return 0.0f;
-#endif
-}
 
 
 /**

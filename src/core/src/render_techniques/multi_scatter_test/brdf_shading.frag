@@ -1,7 +1,7 @@
 #include "../../gpu_shared.h"
 cbuffer FrameCB : register(b0)
 {
-	int g_BRDFModel;
+	uint g_BRDFModel;
 	float3 _padding;
 	float4x4 g_ViewProjectionInverse;
 };
@@ -86,7 +86,7 @@ float4 main(float4 pos : SV_Position) : SV_Target0
 
 	Material material = g_MaterialBuffer[instance.material_index];
 	MaterialEvaluated me = MakeMaterialEvaluated(material, meshUV);
-	MaterialBRDF brdf = MakeMaterialBRDF(me);
+    MaterialBRDF brdf = MakeMaterialBRDF(me, g_BRDFModel);
 
 	float3 V = normalize(g_Eye - worldPos);
 	
@@ -150,11 +150,11 @@ float4 main(float4 pos : SV_Position) : SV_Target0
 		
 		totalLighting += f * radiance * NdotL;
 	}
-    uint albedoTex = asuint(material.albedo.w);
-    float3 dbg = g_TextureMaps[NonUniformResourceIndex(albedoTex)].SampleLevel(g_TextureSampler, meshUV, 0).xyz;
     //return float4(meshUV,0,1);
     //return float4(dbg, 1);
     return float4(totalLighting, 1);
     //return visibility;
     //return float4(primitiveID / 255, 0, 0, 1);
+    //return float4(brdf.albedo,1);
+
 }

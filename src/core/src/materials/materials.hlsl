@@ -190,7 +190,7 @@ float ClampAlphaRoughness(const float alpha)
  * @param material The material to evaluate.
  * @return The new material data.
  */
-MaterialBRDF MakeMaterialBRDF(MaterialEvaluated material, BRDFType brdfType)
+MaterialBRDF MakeMaterialBRDF(MaterialEvaluated material, uint brdfType)
 {
     float3 albedo = material.albedo;
 #ifndef DISABLE_SPECULAR_MATERIALS
@@ -203,7 +203,7 @@ MaterialBRDF MakeMaterialBRDF(MaterialEvaluated material, BRDFType brdfType)
     MaterialBRDF ret =
     {
         albedo,
-        brdfType,
+        (BRDFType)brdfType,
     3,
      0,
 #ifndef DISABLE_SPECULAR_MATERIALS
@@ -222,7 +222,7 @@ MaterialBRDF MakeMaterialBRDF(MaterialEvaluated material, BRDFType brdfType)
  * @param uv       The texture UV values at intersected position.
  * @return The new material data.
  */
-MaterialBRDF MakeMaterialBRDF(Material material, float2 uv, BRDFType brdfType)
+MaterialBRDF MakeMaterialBRDF(Material material, float2 uv, uint brdfType)
 {
     return MakeMaterialBRDF(MakeMaterialEvaluated(material, uv), brdfType);
 }
@@ -235,7 +235,7 @@ MaterialBRDF MakeMaterialBRDF(Material material, float2 uv, BRDFType brdfType)
  * @param gradY    The UV partial derivatives along the Y axis.
  * @return The new material data.
  */
-MaterialBRDF MakeMaterialBRDF(Material material, float2 uv, float2 gradX, float2 gradY, BRDFType brdfType)
+MaterialBRDF MakeMaterialBRDF(Material material, float2 uv, float2 gradX, float2 gradY, uint brdfType)
 {
     return MakeMaterialBRDF(MakeMaterialEvaluated(material, uv, gradX, gradY), brdfType);
 }
@@ -498,7 +498,7 @@ MaterialBRDF unpackMaterial(in uint packedMaterial)
     material2.metallicity = ((metallicityRoughness >> 8) & 0xFFu) / 255.0f;
     material2.roughness = ((metallicityRoughness >> 0) & 0xFFu) / 255.0f;
 
-    material = MakeMaterialBRDF(material2,BRDF_GGX);
+    material = MakeMaterialBRDF(material2,0);
 #endif
     return material;
 }

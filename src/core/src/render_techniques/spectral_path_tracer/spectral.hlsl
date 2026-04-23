@@ -3,10 +3,11 @@
 #include "ray_tracing/path_tracing_shared.h"
 #include "materials/material_sampling.hlsl"
 #include "components/random_number_generator/random_number_generator.hlsl"
-#include "render_techniques/multi_scatter_test/brdf_models.hlsl"
-
+#include "lights/light_evaluation.hlsl"
 static const float g_LambdaMin = 400.0f;
 static const float g_LambdaMax = 700.0f;
+
+
 
 float sampleHeroWavelength(inout Random rng)
 {
@@ -14,18 +15,32 @@ float sampleHeroWavelength(inout Random rng)
     return lerp(g_LambdaMin, g_LambdaMax, u);
 }
 
-// Simple camera response → RGB weight; replace with your basis
+float basisR(float lambda)
+{
+    float x = (lambda - g_LambdaMin) / (g_LambdaMax - g_LambdaMin);   // normalize 400–700 → 0–1
+    return saturate(1.0 - abs(x - 0.75) * 3.0);
+}
+
+float basisG(float lambda)
+{
+    float x = (lambda - g_LambdaMin) / (g_LambdaMax - g_LambdaMin);
+    return saturate(1.0 - abs(x - 0.50) * 3.0);
+}
+
+float basisB(float lambda)
+{
+    float x = (lambda - g_LambdaMin) / (g_LambdaMax - g_LambdaMin);
+    return saturate(1.0 - abs(x - 0.25) * 3.0);
+}
+
+float sampleHeroReflectance(float3 rgb, float3 rgbWeight)
+{
+    return dot(rgb, rgbWeight);
+}
+
 float3 heroRGBWeight(float lambda)
 {
-    // Convert nm → normalized 0..1
-    float t = saturate((lambda - 380.0f) / (780.0f - 380.0f));
-
-    // Smooth overlapping lobes (approximate RGB sensitivity curves)
-    float r = exp(-0.5 * pow((t - 0.75) / 0.15, 2.0));
-    float g = exp(-0.5 * pow((t - 0.50) / 0.15, 2.0));
-    float b = exp(-0.5 * pow((t - 0.25) / 0.15, 2.0));
-
-    return float3(r, g, b);
+    return float3(basisR(lambda), basisG(lambda), basisB(lambda));
 }
 
 float sampleMpmlReflectance(MaterialBRDF material, float lambda)
@@ -38,7 +53,7 @@ float sampleMpmlReflectance(MaterialBRDF material, float lambda)
 }
 
 float sampleBRDFPDFAndEvaluteSpectral(MaterialBRDF material, float3 normal, float3 viewDirection,
-    float3 lightDirection, float lambda, out float reflectanceLambda)
+    float3 lightDirection, float lambda, float3 rgbWeight, out float reflectanceLambda)
 {
 #ifndef DISABLE_SPECULAR_MATERIALS
     // Transform the view+light direction into the surfaces tangent coordinate space (oriented so that z axis is aligned to normal)
@@ -57,9 +72,7 @@ float sampleBRDFPDFAndEvaluteSpectral(MaterialBRDF material, float3 normal, floa
 
     float3 f_rgb = evaluateBRDF(material, float3(0,0,1), localView, newLight);
 
-    float3 LUMA = float3(0.2126, 0.7152, 0.0722);
-    float R_lambda = sampleMpmlReflectance(material, lambda);
-    reflectanceLambda = dot(f_rgb, LUMA) * R_lambda;
+    reflectanceLambda = sampleHeroReflectance(f_rgb, rgbWeight);
 
     // Must use specular direction for H.V to match sampling functions
     float3 specularLightDirection = estimateSpecularPeak(material, float3(0.0f, 0.0f, 1.0f), localView);
@@ -77,9 +90,7 @@ float sampleBRDFPDFAndEvaluteSpectral(MaterialBRDF material, float3 normal, floa
     float dotHV = saturate(dot(halfVector, viewDirection));
     float3 f_rgb = evaluateBRDFDiffuse(material, dotHV, dotNL);
 
-    float3 LUMA = float3(0.2126, 0.7152, 0.0722);
-    float R_lambda = sampleMpmlReflectance(material, lambda);
-    reflectance_lambda = dot(f_rgb, LUMA) * R_lambda;
+    reflectance_lambda = sampleHeroReflectance(f_rgb, rgbWeight);
 
     // Calculate diffuse PDF for current sample
     float samplePDF = sampleLambertPDF(dotNL);
@@ -89,7 +100,7 @@ float sampleBRDFPDFAndEvaluteSpectral(MaterialBRDF material, float3 normal, floa
 
 template<typename RNG>
 float sampleBRDFAndEvaluateSpectral(MaterialBRDF material, inout RNG randomNG, float3 normal, float3 viewDirection, 
-float lambda, out float3 lightDirection, out float pdf, out bool specularSampled)
+float lambda, float3 rgbWeight, out float3 lightDirection, out float pdf, out bool specularSampled)
 {
     // Transform the view direction into the surfaces tangent coordinate space (oriented so that z axis is aligned to normal)
     Quaternion localRotation = QuaternionRotationZ(normal);
@@ -137,8 +148,7 @@ float lambda, out float3 lightDirection, out float pdf, out bool specularSampled
 #else
     float3 f_rgb = evaluateBRDFDiffuse(material, dotHV, dotNL);
 #endif
-    float R_lambda = sampleMpmlReflectance(material, lambda);
-    float f_lambda = dot(f_rgb, float3(0.2126, 0.7152, 0.0722)) * R_lambda; /// float3(0.2126, 0.7152, 0.0722) is the Luminance weights from the CIE 1931 XYZ color space for sRGB/Rec.709
+    float f_lambda = sampleHeroReflectance(f_rgb, rgbWeight); 
     // Calculate combined PDF for current sample
     // Note: has some duplicated calculations in evaluateBRDF_GGX and sampleBRDFPDF
 #ifndef DISABLE_SPECULAR_MATERIALS
@@ -152,5 +162,18 @@ float lambda, out float3 lightDirection, out float pdf, out bool specularSampled
     return f_lambda;
 }
 
+float evaluateEnvironmentLightSpectral(LightEnvironment light, float3 direction, float lambda, float3 rgbWeight)
+{
+#ifndef DISABLE_ENVIRONMENT_LIGHTS
+    // Sample RGB environment map
+    float3 env_rgb = g_EnvironmentBuffer.SampleLevel(g_TextureSampler, direction, 0.0f).xyz;
+    // Convert RGB → scalar spectral radiance
+    float env_lambda = sampleHeroReflectance(env_rgb, rgbWeight); ///Rec.709 Luminance weights
+
+    return env_lambda;
+#else
+    return 0.0f;
+#endif
+}
 #endif // SPECTRAL_HLSL
 
