@@ -1,9 +1,9 @@
 #include "../../gpu_shared.h"
 cbuffer FrameCB : register(b0)
 {
-	uint g_BRDFModel;
-	float3 _padding;
-	float4x4 g_ViewProjectionInverse;
+    uint g_BRDFModel;
+    float3 _padding;
+    float4x4 g_ViewProjectionInverse;
 };
 
 float3 g_Eye;
@@ -61,95 +61,95 @@ static const float3 kLightCol = float3(1.0f, 1.0f, 1.0f);
 
 float4 main(float4 pos : SV_Position) : SV_Target0
 {
-	
-	uint2 did = uint2(pos.xy);
-	float2 uv = (did + 0.5f) / g_BufferDimensions;
-	float depth = g_DepthBuffer.Load(int3(did, 0)).x;
-	if (depth <= 0.0f)
-		return float4(0, 0, 0, 1);
-	
-	float3 worldPos = transformPointProjection(uv, depth, g_ViewProjectionInverse);
+    
+    uint2 did = uint2(pos.xy);
+    float2 uv = (did + 0.5f) / g_BufferDimensions;
+    float depth = g_DepthBuffer.Load(int3(did, 0)).x;
+    if (depth <= 0.0f)
+        return float4(0, 0, 0, 1);
+    
+    float3 worldPos = transformPointProjection(uv, depth, g_ViewProjectionInverse);
 
-	float3 N = normalize(2.0f * g_ShadingNormalBuffer.Load(int3(did, 0)).xyz - 1.0f);
-	
-	float4 visibility = g_VisibilityBuffer.Load(int3(did, 0));
-	uint instanceID = asuint(visibility.z);
-	uint primitiveID = asuint(visibility.w);
+    float3 N = normalize(2.0f * g_ShadingNormalBuffer.Load(int3(did, 0)).xyz - 1.0f);
+    
+    float4 visibility = g_VisibilityBuffer.Load(int3(did, 0));
+    uint instanceID = asuint(visibility.z);
+    uint primitiveID = asuint(visibility.w);
 
-	Instance instance = g_InstanceBuffer[instanceID];
-	
-	UVs uvs = fetchUVs(instance, primitiveID);
-	float2 meshUV = interpolate(uvs.uv0, uvs.uv1, uvs.uv2, visibility.xy);
-	
-	
-	
+    Instance instance = g_InstanceBuffer[instanceID];
+    
+    UVs uvs = fetchUVs(instance, primitiveID);
+    float2 meshUV = interpolate(uvs.uv0, uvs.uv1, uvs.uv2, visibility.xy);
+    
+    
+    
 
-	Material material = g_MaterialBuffer[instance.material_index];
-	MaterialEvaluated me = MakeMaterialEvaluated(material, meshUV);
+    Material material = g_MaterialBuffer[instance.material_index];
+    MaterialEvaluated me = MakeMaterialEvaluated(material, meshUV);
     MaterialBRDF brdf = MakeMaterialBRDF(me, g_BRDFModel);
 
-	float3 V = normalize(g_Eye - worldPos);
-	
-	
-	float3 totalLighting = 0.0f;
-	uint lightCount = getNumberLights();
-	// Skip lighting calculations if there are only area lights, as they require special handling (sampling the light source geometry or monte carlo integration) that is not implemented in this shader (needs ib and vb access) Also really expensive to evaluate and not common in real time scenes, so better to just skip for now
-	//if (getNumberLights() == getNumberAreaLights()) 
-		//return float4(0, 0, 0, 1);
-	for (uint i = 0; i < lightCount; i++)
-	{
-	
-		Light light = getLight(i);
-		LightType type = light.get_light_type();
-		// Skip area and environment lights early
-		if (type != kLight_Point &&
-		type != kLight_Spot &&
-		type != kLight_Direction)
-		{
-			continue;
-		}
-		
-		float3 L;
-		
-		if (type == kLight_Point)
-		{
-			LightPoint lp = MakeLightPoint(light);
-			L = normalize(lp.position - worldPos);
-		}
-		else if (type == kLight_Spot)
-		{
-			LightSpot sp = MakeLightSpot(light);
-			L = normalize(sp.position - worldPos);
-		}
-		else if (type == kLight_Direction)
-		{
-			LightDirectional dl = MakeLightDirectional(light);
-			L = normalize(dl.direction);
-		}
-		else
-		{
-		// Area/env lights need special handling — skiping for now (needs ib and vb access to get the actual geometry of the light source or monte carlo) 
-			continue;
-		}
-		
-		float NdotL = saturate(dot(N, L));
-		if (NdotL <= 0.0f)
-			continue;
-		
-		float3 radiance = evaluateLight(light, worldPos, L);
-		
-		float3 f;
-		if (g_BRDFModel == 0)
+    float3 V = normalize(g_Eye - worldPos);
+    
+    
+    float3 totalLighting = 0.0f;
+    uint lightCount = getNumberLights();
+    // Skip lighting calculations if there are only area lights, as they require special handling (sampling the light source geometry or monte carlo integration) that is not implemented in this shader (needs ib and vb access) Also really expensive to evaluate and not common in real time scenes, so better to just skip for now
+    //if (getNumberLights() == getNumberAreaLights()) 
+        //return float4(0, 0, 0, 1);
+    for (uint i = 0; i < lightCount; i++)
+    {
+    
+        Light light = getLight(i);
+        LightType type = light.get_light_type();
+        // Skip area and environment lights early
+        if (type != kLight_Point &&
+        type != kLight_Spot &&
+        type != kLight_Direction)
+        {
+            continue;
+        }
+        
+        float3 L;
+        
+        if (type == kLight_Point)
+        {
+            LightPoint lp = MakeLightPoint(light);
+            L = normalize(lp.position - worldPos);
+        }
+        else if (type == kLight_Spot)
+        {
+            LightSpot sp = MakeLightSpot(light);
+            L = normalize(sp.position - worldPos);
+        }
+        else if (type == kLight_Direction)
+        {
+            LightDirectional dl = MakeLightDirectional(light);
+            L = normalize(dl.direction);
+        }
+        else
+        {
+        // Area/env lights need special handling — skiping for now (needs ib and vb access to get the actual geometry of the light source or monte carlo) 
+            continue;
+        }
+        
+        float NdotL = saturate(dot(N, L));
+        if (NdotL <= 0.0f)
+            continue;
+        
+        float3 radiance = evaluateLight(light, worldPos, L);
+        
+        float3 f;
+        if (g_BRDFModel == 0)
             f = Cook_Torrance(N, V, L, brdf);
-		else if (g_BRDFModel == 1)
+        else if (g_BRDFModel == 1)
             f = Fast_MSX(N, V, L, brdf);
         else if (g_BRDFModel == 2)
             f = Heitz(N, V, L, brdf);
-		else if (g_BRDFModel == 3)
+        else if (g_BRDFModel == 3)
             f = StudentT_BRDF(N, V, L, brdf);
-		
-		totalLighting += f * radiance * NdotL;
-	}
+        
+        totalLighting += f * radiance * NdotL;
+    }
     //return float4(meshUV,0,1);
     //return float4(dbg, 1);
     return float4(totalLighting, 1);

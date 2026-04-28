@@ -29,7 +29,7 @@ THE SOFTWARE.
 #include "math/math_constants.hlsl"
 #include "math/sampling.hlsl"
 #include "math/pack.hlsl"
-
+#include "render_techniques/spectral_path_tracer/spectral.hlsl"
 /*
 // Requires the following data to be defined in any shader that uses this file
 TextureCube g_EnvironmentBuffer;
@@ -91,9 +91,9 @@ float evaluateAreaLightSpectral(LightArea light, float2 barycentric, float lambd
         emissivity_rgb *= tex.xyz;
         emissivity_rgb *= tex.w; // alpha modulation
     }
-
+    float3 rgbW = heroRGBWeightUnnormalized(lambda);
     // Convert RGB emissivity → scalar spectral emissivity
-    float emissivity_lambda = dot(emissivity_rgb, float3(0.2126, 0.7152, 0.0722));
+    float emissivity_lambda = dot(emissivity_rgb, rgbW);
 
     return emissivity_lambda;
 #else
