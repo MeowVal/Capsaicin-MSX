@@ -31,6 +31,8 @@ THE SOFTWARE.
 #pragma warning(disable : 4305)
 #include "render_techniques/spectral_path_tracer/rgb2spec_bt709_64.h"
 #pragma warning(pop)
+#include "spectral_cmf.h"
+
 
 auto const *kSpectralPTRaygenShaderName       = "SpectralPTRaygen";
 auto const *kSpectralPTMissShaderName         = "SpectralPTMiss";

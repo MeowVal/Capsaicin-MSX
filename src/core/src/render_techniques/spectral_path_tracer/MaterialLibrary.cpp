@@ -35,6 +35,17 @@ void convert_mediums(Medium & medium, MPMLMedium & new_medium)
 	new_medium.ior_imag = float3(static_cast<float>(ior[0].imag()), static_cast<float>(ior[1].imag()), static_cast<float>(ior[2].imag()));
 }
 
+void load_mpml(std::string const &filename, std::map<std::string, Medium> &lMedia,
+    std::map<std::string, Interface> &lInterfaces)
+{
+    // Call the real MPML loader (1‑argument version)
+    load_mpml(filename);
+
+    // Now copy the global MPML data into the maps passed in
+    lMedia     = ::media;      // from Medium.h global
+    lInterfaces = ::interfaces; // from Interface.h global
+}
+
 void load_mpml(const string & filename, map<string, MPMLMedium>& lMedia, map<string, Medium>& full_media, map<string, MPMLInterface>& interface_map)
 {
 	map<string, Medium> media_old;
@@ -77,21 +88,21 @@ void get_relative_ior(const MPMLMedium & med_in, const MPMLMedium & med_out, flo
 	kappa = (eta1 * kappa2 - eta2 * kappa1)/ab;
 }
 
-map<string, MPMLInterface> MaterialLibrary::interfaces = map<string, MPMLInterface>();
-map<string, MPMLMedium> MaterialLibrary::media = map<string, MPMLMedium>();
-map<string, Medium> MaterialLibrary::full_media = map<string, Medium>();
+map<string, MPMLInterface> MaterialLibrary::mpmlInterfaces = map<string, MPMLInterface>();
+map<string, MPMLMedium>    MaterialLibrary::mpmlMedia  = map<string, MPMLMedium>();
+map<string, Medium>        MaterialLibrary::mpmlFullMedia  = map<string, Medium>();
 
 void MaterialLibrary::convert_and_store(Medium m)
 {
 	MPMLMedium * new_medium = new MPMLMedium();
 	convert_mediums(m, *new_medium);
-	media[m.name] = *new_medium;
-	full_media[m.name] = m; 
+    mpmlMedia[m.name]     = *new_medium;
+    mpmlFullMedia[m.name] = m;
 }
 
 void MaterialLibrary::load(const char * mpml_path)
 {
-	load_mpml(mpml_path,media, full_media, interfaces);
+    load_mpml(mpml_path, mpmlMedia, mpmlFullMedia, mpmlInterfaces);
 	Medium air;
 	air.get_ior(mono).resize(1);
 	air.get_ior(mono)[0] = complex<double>(1.0, 0.0);
@@ -100,7 +111,7 @@ void MaterialLibrary::load(const char * mpml_path)
 	air.turbid = false;
 	MPMLMedium * air_converted = new MPMLMedium();
 	convert_mediums(air,*air_converted);
-	media["air"] = *air_converted;
+    mpmlMedia["air"] = *air_converted;
 
 	convert_and_store(deep_crown_glass());	
 	convert_and_store(crown_glass());

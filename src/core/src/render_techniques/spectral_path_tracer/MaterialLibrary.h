@@ -40,9 +40,9 @@ public:
 class MaterialLibrary
 {
 public:
-	static std::map<std::string, MPMLMedium> media;
-	static std::map<std::string, Medium> full_media;
-	static std::map<std::string, MPMLInterface> interfaces;
+    static std::map<std::string, MPMLMedium>    mpmlMedia;
+    static std::map<std::string, Medium>        mpmlFullMedia;
+    static std::map<std::string, MPMLInterface> mpmlInterfaces;
 	static void load(const char * mpml_path);
 private:
 	static void convert_and_store(Medium m);
@@ -55,5 +55,6 @@ void convert_mediums(Medium & medium, MPMLMedium & new_medium);
 void load_mpml(const std::string & filename, 
 			   std::map<std::string, MPMLMedium>& media, 
 			   std::map<std::string, MPMLInterface>& interface_map);
-
+void load_mpml(std::string const &filename, std::map<std::string, Medium> &media,
+    std::map<std::string, Interface> &interfaces);
 #endif // MATERIAL_LIBRARY_H

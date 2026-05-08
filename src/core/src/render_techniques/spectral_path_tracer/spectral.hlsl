@@ -37,9 +37,9 @@ float sampleHeroWavelength(inout Random rng)
     return SampleVisibleWavelengths(u);
 }
 
-float sampleHeroWavelengthUniform(float rng)
+float sampleHeroWavelengthUniform(float u)
 {
-    float u = rng.rand();
+    
     return lerp(g_LambdaMin, g_LambdaMax, u);
 }
 
@@ -51,11 +51,14 @@ void sampleHeroWavelengths3(inout Random rng, out float3 lambda, out float3 pdf)
     float u1 = frac(u + 1.0 / 3.0);
     float u2 = frac(u + 2.0 / 3.0);
 
-    lambda.x = sampleHeroWavelengthUniform(u0);
-    lambda.y = sampleHeroWavelengthUniform(u1);
-    lambda.z = sampleHeroWavelengthUniform(u2);
+    lambda.x = SampleVisibleWavelengths(u0);
+    lambda.y = SampleVisibleWavelengths(u1);
+    lambda.z = SampleVisibleWavelengths(u2);
 
-    pdf = float3(1.0f / (g_LambdaMax - g_LambdaMin),1.0f / (g_LambdaMax - g_LambdaMin),1.0f / (g_LambdaMax - g_LambdaMin));
+    pdf.x = VisibleWavelengthsPDF(lambda.x);
+    pdf.y = VisibleWavelengthsPDF(lambda.y);
+    pdf.z = VisibleWavelengthsPDF(lambda.z);
+
 }
 
 
@@ -184,21 +187,43 @@ float3 LookupRGB2SpecCoeffs( float3 rgb )
 
     return lerp(c0z, c1z, dz);
 }
+float3 bt709_to_srgb_linear(float3 c)
+{
+    // BT.709 linear → sRGB nonlinear
+    float3 srgb_nl = select(
+        1.099 * pow(c, 0.45) - 0.099, // else
+        c * 4.5, // if
+        c <= 0.018
+    );
 
+    // sRGB nonlinear → sRGB linear
+    float3 srgb_lin = select(
+        pow((srgb_nl + 0.055) / 1.055, 2.4), // else
+        srgb_nl / 12.92, // if
+        srgb_nl <= 0.04045
+    );
+
+    return srgb_lin;
+}
 float RGBToSpectrumTableSingle(float lambda, float3 rgb)
 {
+    
     float3 coeffs = LookupRGB2SpecCoeffs(rgb);
     float t = (lambda - g_LambdaMin) / (g_LambdaMax - g_LambdaMin);
     return s(EvaluatePolynomial(t, coeffs.z, coeffs.y, coeffs.x));;
 }
 float3 RGBToSpectrumTable3(float3 lambda_nm, float3 rgb)
 {
+    float3 sRGB = bt709_to_srgb_linear(rgb);
     return float3(
-        RGBToSpectrumTableSingle(lambda_nm.x, rgb),
-        RGBToSpectrumTableSingle(lambda_nm.y, rgb),
-        RGBToSpectrumTableSingle(lambda_nm.z, rgb)
+        RGBToSpectrumTableSingle(lambda_nm.x, sRGB),
+        RGBToSpectrumTableSingle(lambda_nm.y, sRGB),
+        RGBToSpectrumTableSingle(lambda_nm.z, sRGB)
     );
 }
+
+
+
 
 /// Wyman et al. Simple Analytic Approximations to the CIE XYZ Color Matching Functions
 float xFit_1931( float wave )
@@ -228,15 +253,47 @@ float3 WymanCie1931(float lambda, float T_Lambda)
     float z = zFit_1931(lambda)*T_Lambda;
     return float3(x, y, z);
 }
-
-float3 WymanCie1931_3(float3 lambda, float3 T_Lambda)
+float3 PBRTCie1931(float lambda)
 {
-    float3 xyz1 = WymanCie1931(lambda.x,T_Lambda.x);
-    float3 xyz2 = WymanCie1931(lambda.y,T_Lambda.y);
-    float3 xyz3 = WymanCie1931(lambda.z,T_Lambda.z);
+    // map lambda to index 0–94
+    float t = (lambda - g_LambdaMin) / (g_LambdaMax - g_LambdaMin);
+    float idx = t * 94.0f;
+
+    int i0 = clamp((int) floor(idx), 0, 93);
+    int i1 = i0 + 1;
+
+    float w = idx - i0;
+
+    float x = lerp(cie_x[i0], cie_x[i1], w);
+    float y = lerp(cie_y[i0], cie_y[i1], w);
+    float z = lerp(cie_z[i0], cie_z[i1], w);
+
+    return float3(x, y, z);
+}
+
+float3 SpectralToXYZ(float3 lambda, float3 T_lambda, float3 pdf_lambda)
+{
+    float3 xyz = 0;
+
+    xyz += PBRTCie1931(lambda.x) * T_lambda.x / pdf_lambda.x;
+    xyz += PBRTCie1931(lambda.y) * T_lambda.y / pdf_lambda.y;
+    xyz += PBRTCie1931(lambda.z) * T_lambda.z / pdf_lambda.z;
+
+    xyz /= 3.0f; // average 3 samples
+
+    xyz /= 10566.864005283874576; // PBRT Y normalization   from rgb2spec_opt.cpp
+
+    return xyz;
+}
+
+float3 WymanCie1931_3(float3 lambda, float3 T_Lambda, float3 pdf_lambda)
+{
+    float3 xyz1 = WymanCie1931(lambda.x, T_Lambda.x) / pdf_lambda.x;
+    float3 xyz2 = WymanCie1931(lambda.y, T_Lambda.y) / pdf_lambda.y;
+    float3 xyz3 = WymanCie1931(lambda.z, T_Lambda.z) / pdf_lambda.z;
 
     float3 XYZ = (xyz1 + xyz2 + xyz3) / 3.0f;
-    return XYZ/106.856895f;
+    return XYZ / 106.856895f; // ∫ ȳ(λ) dλ, ∫ yFit_1931(λ) dλ ≈ 106.856895 
 }
 float3 reconstructBT709(float3 XYZ)
 {
@@ -244,12 +301,14 @@ float3 reconstructBT709(float3 XYZ)
     return max(rgb, 0.0.xxx);
 }
 
-float3 SpectralToRGB(float3 lambda,float3 T_Lambda )
+float3 SpectralToRGB(float3 lambda, float3 T_Lambda, float3 pdf_lambda)
 {
-    float3 XYZ = WymanCie1931_3(lambda,T_Lambda);
+    float3 XYZ = SpectralToXYZ(lambda, T_Lambda, pdf_lambda);
 
     return reconstructBT709(XYZ);
 }
+
+
 float3 heroRGBWeightUnnormalized(float lambda_nm)
 {
     float3 XYZ = WymanCie1931(lambda_nm, 1);
