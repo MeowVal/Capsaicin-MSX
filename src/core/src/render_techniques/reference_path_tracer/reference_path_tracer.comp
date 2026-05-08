@@ -34,7 +34,11 @@ uint g_SampleCount;
 uint g_Accumulate;
 
 uint g_FrameIndex;
-
+uint g_Res;
+Texture2D<float4> g_ZNodes;
+Texture2D<float4> g_RGB2SpecLUT0;
+Texture2D<float4> g_RGB2SpecLUT1;
+Texture2D<float4> g_RGB2SpecLUT2;
 StructuredBuffer<Instance> g_InstanceBuffer;
 StructuredBuffer<float3x4> g_TransformBuffer;
 StructuredBuffer<uint> g_IndexBuffer;

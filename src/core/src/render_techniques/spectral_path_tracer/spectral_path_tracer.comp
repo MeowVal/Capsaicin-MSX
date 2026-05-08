@@ -28,8 +28,14 @@ THE SOFTWARE.
 #define USE_CUSTOM_HIT_PAYLOAD   1
 #define USE_CUSTOM_HIT_FUNCTIONS 1
 #define USE_CUSTOM_PATH_NEXT     1
-#include "ray_tracing/path_tracing_shared.h"
 
+
+#include "ray_tracing/path_tracing_shared.h"
+uint g_Res;
+Texture2D<float4> g_ZNodes : register(t10);
+Texture2D<float4> g_RGB2SpecLUT0 : register(t11);
+Texture2D<float4> g_RGB2SpecLUT1 : register(t12);
+Texture2D<float4> g_RGB2SpecLUT2 : register(t13);
 uint2 g_BufferDimensions;
 RayCamera g_RayCamera;
 uint g_BounceCount;
@@ -38,6 +44,7 @@ uint g_SampleCount;
 uint g_Accumulate;
 
 uint g_FrameIndex;
+
 
 StructuredBuffer<Instance> g_InstanceBuffer;
 StructuredBuffer<float3x4> g_TransformBuffer;

@@ -27,6 +27,10 @@ THE SOFTWARE.
 #include "components/light_sampler/light_sampler_switcher.h"
 #include "components/random_number_generator/random_number_generator.h"
 #include "components/stratified_sampler/stratified_sampler.h"
+#pragma warning(push)
+#pragma warning(disable : 4305)
+#include "render_techniques/spectral_path_tracer/rgb2spec_bt709_64.h"
+#pragma warning(pop)
 
 auto const *kSpectralPTRaygenShaderName       = "SpectralPTRaygen";
 auto const *kSpectralPTMissShaderName         = "SpectralPTMiss";
@@ -51,6 +55,7 @@ SpectralPT::~SpectralPT()
 RenderOptionList SpectralPT::getRenderOptions() noexcept
 {
     RenderOptionList newOptions;
+    newOptions.emplace(RENDER_OPTION_MAKE(brdf_model, options));
     newOptions.emplace(RENDER_OPTION_MAKE(spectral_pt_bounce_count, options));
     newOptions.emplace(RENDER_OPTION_MAKE(spectral_pt_min_rr_bounces, options));
     newOptions.emplace(RENDER_OPTION_MAKE(spectral_pt_sample_count, options));
@@ -68,6 +73,7 @@ RenderOptionList SpectralPT::getRenderOptions() noexcept
 SpectralPT::RenderOptions SpectralPT::convertOptions(RenderOptionList const &options) noexcept
 {
     RenderOptions newOptions;
+    RENDER_OPTION_GET(brdf_model, newOptions, options)
     RENDER_OPTION_GET(spectral_pt_bounce_count, newOptions, options)
     RENDER_OPTION_GET(spectral_pt_min_rr_bounces, newOptions, options)
     RENDER_OPTION_GET(spectral_pt_sample_count, newOptions, options)
@@ -100,10 +106,60 @@ SharedTextureList SpectralPT::getSharedTextures() const noexcept
 
 bool SpectralPT::init(CapsaicinInternal const &capsaicin) noexcept
 {
+    rez           = sRGBToSpectrumTable_Res;
     rayCameraData = gfxCreateBuffer<RayCamera>(gfx_, 1, nullptr, kGfxCpuAccess_Write);
     rayCameraData.setName("Capsaicin_PT_RayCamera");
     accumulationBuffer =
         capsaicin.createRenderTexture(DXGI_FORMAT_R32G32B32A32_FLOAT, "PT_AccumulationBuffer");
+    std::vector<glm::vec4> flattened(rez * rez * rez);
+    printf("rez=%u, required=%llu, buffer=%llu\n", rez, uint64_t(rez) * rez * rez * 16,
+        uint64_t(flattened.size()) * sizeof(glm::vec4));
+    for (int i = 0; i < 3; i++)
+    {
+        rgb2SpecLUT[i] = gfxCreateTexture2D(
+            gfx_, rez, rez * rez, DXGI_FORMAT_R32G32B32A32_FLOAT, 1, nullptr, D3D12_RESOURCE_FLAG_NONE);
+
+        
+
+        for (uint32_t z = 0; z < rez; z++)
+        {
+            for (uint32_t y = 0; y < rez; y++)
+            {
+                for (uint32_t x = 0; x < rez; x++)
+                {
+                    uint32_t dstIndex = x + rez * (y + rez * z);
+
+                    flattened[dstIndex] = glm::vec4(sRGBToSpectrumTable_Data[i][z][y][x][0],
+                        sRGBToSpectrumTable_Data[i][z][y][x][1], sRGBToSpectrumTable_Data[i][z][y][x][2],1.0f);
+                }
+            }
+        }
+        
+        GfxBuffer upload = gfxCreateBuffer(gfx_, 
+            flattened.size() * sizeof(glm::vec4), 
+            flattened.data(),  
+            kGfxCpuAccess_Write);
+
+        gfxCommandCopyBufferToTexture(gfx_, rgb2SpecLUT[i], upload);
+        gfxTextureSetResourceState(gfx_, rgb2SpecLUT[i], D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    }
+
+    zNodes = gfxCreateTexture2D(gfx_,
+        rez, // width
+        1,  // height
+        DXGI_FORMAT_R32G32B32A32_FLOAT,
+        1,       // mip levels
+        nullptr, // clear value
+        D3D12_RESOURCE_FLAG_NONE);
+    std::vector<glm::vec4> zNodesData(rez);
+    for (uint32_t i = 0; i < rez; i++)
+    {
+        zNodesData[i] = glm::vec4(sRGBToSpectrumTable_Scale[i], 0, 0, 0);
+    }
+    GfxBuffer uploadZ = gfxCreateBuffer(gfx_, zNodesData.size() * sizeof(glm::vec4), // rez * 16 bytes
+        zNodesData.data(), kGfxCpuAccess_Write);
+    gfxCommandCopyBufferToTexture(gfx_, zNodes, uploadZ);
+    gfxTextureSetResourceState(gfx_, zNodes, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 
     spectral_pt_program_ = capsaicin.createProgram(getProgramName());
     return initKernels(capsaicin);
@@ -165,6 +221,12 @@ void SpectralPT::render(CapsaicinInternal &capsaicin) noexcept
     gfxProgramSetParameter(gfx_, spectral_pt_program_, "g_SampleCount", options.spectral_pt_sample_count);
     gfxProgramSetParameter(gfx_, spectral_pt_program_, "g_Accumulate", accumulate ? 1 : 0);
 
+    gfxProgramSetTexture(gfx_, spectral_pt_program_, "g_RGB2SpecLUT0", rgb2SpecLUT[0]);
+    gfxProgramSetTexture(gfx_, spectral_pt_program_, "g_RGB2SpecLUT1", rgb2SpecLUT[1]);
+    gfxProgramSetTexture(gfx_, spectral_pt_program_, "g_RGB2SpecLUT2", rgb2SpecLUT[2]);
+    gfxProgramSetParameter(gfx_, spectral_pt_program_, "g_ZNodes", zNodes);
+    gfxProgramSetParameter(gfx_, spectral_pt_program_, "g_Res", rez);
+
     stratified_sampler->addProgramParameters(capsaicin, spectral_pt_program_);
     rng->addProgramParameters(capsaicin, spectral_pt_program_);
 
@@ -217,6 +279,15 @@ void SpectralPT::terminate() noexcept
     rayCameraData = {};
     gfxDestroyTexture(gfx_, accumulationBuffer);
     accumulationBuffer = {};
+
+    gfxDestroyTexture(gfx_, zNodes);
+    zNodes = {};
+    gfxDestroyTexture(gfx_, rgb2SpecLUT[0]);
+    gfxDestroyTexture(gfx_, rgb2SpecLUT[1]);
+    gfxDestroyTexture(gfx_, rgb2SpecLUT[2]);
+    rgb2SpecLUT[0] = {};
+    rgb2SpecLUT[1] = {};
+    rgb2SpecLUT[2] = {};
 
     gfxDestroyProgram(gfx_, spectral_pt_program_);
     spectral_pt_program_ = {};

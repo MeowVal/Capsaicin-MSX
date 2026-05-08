@@ -51,6 +51,7 @@ ReferencePT::~ReferencePT()
 RenderOptionList ReferencePT::getRenderOptions() noexcept
 {
     RenderOptionList newOptions;
+    newOptions.emplace(RENDER_OPTION_MAKE(brdf_model, options));
     newOptions.emplace(RENDER_OPTION_MAKE(reference_pt_bounce_count, options));
     newOptions.emplace(RENDER_OPTION_MAKE(reference_pt_min_rr_bounces, options));
     newOptions.emplace(RENDER_OPTION_MAKE(reference_pt_sample_count, options));
@@ -68,6 +69,7 @@ RenderOptionList ReferencePT::getRenderOptions() noexcept
 ReferencePT::RenderOptions ReferencePT::convertOptions(RenderOptionList const &options) noexcept
 {
     RenderOptions newOptions;
+    RENDER_OPTION_GET(brdf_model, newOptions, options);
     RENDER_OPTION_GET(reference_pt_bounce_count, newOptions, options)
     RENDER_OPTION_GET(reference_pt_min_rr_bounces, newOptions, options)
     RENDER_OPTION_GET(reference_pt_sample_count, newOptions, options)

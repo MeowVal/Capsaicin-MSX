@@ -47,6 +47,7 @@ public:
 
     struct RenderOptions
     {
+        uint      brdf_model               = 0;
         uint32_t spectral_pt_bounce_count = 30; /**< Maximum number of bounces each path can take */
         uint32_t spectral_pt_min_rr_bounces =
             2; /**< Number of bounces a path takes before Russian roulette can be used */
@@ -138,6 +139,9 @@ protected:
 
     GfxBuffer  rayCameraData;
     GfxTexture accumulationBuffer; /**< Buffer used to store pixel running average, .w= number of samples */
+    GfxTexture rgb2SpecLUT[3]; /**< 3D texture for RGB to spectral conversion */
+    GfxTexture zNodes; /**< 1D texture for Z nodes */
+    uint          rez; 
     RayCamera  cameraData;
     RenderOptions options;
 
