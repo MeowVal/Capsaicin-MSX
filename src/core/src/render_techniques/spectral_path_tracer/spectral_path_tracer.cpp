@@ -114,8 +114,6 @@ bool SpectralPT::init(CapsaicinInternal const &capsaicin) noexcept
     accumulationBuffer =
         capsaicin.createRenderTexture(DXGI_FORMAT_R32G32B32A32_FLOAT, "PT_AccumulationBuffer");
     std::vector<glm::vec4> flattened(rez * rez * rez);
-    printf("rez=%u, required=%llu, buffer=%llu\n", rez, uint64_t(rez) * rez * rez * 16,
-        uint64_t(flattened.size()) * sizeof(glm::vec4));
     for (int i = 0; i < 3; i++)
     {
         rgb2SpecLUT[i] = gfxCreateTexture2D(
@@ -141,7 +139,6 @@ bool SpectralPT::init(CapsaicinInternal const &capsaicin) noexcept
             flattened.size() * sizeof(glm::vec4), 
             flattened.data(),  
             kGfxCpuAccess_Write);
-
         gfxCommandCopyBufferToTexture(gfx_, rgb2SpecLUT[i], upload);
         gfxTextureSetResourceState(gfx_, rgb2SpecLUT[i], D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     }
@@ -162,6 +159,11 @@ bool SpectralPT::init(CapsaicinInternal const &capsaicin) noexcept
         zNodesData.data(), kGfxCpuAccess_Write);
     gfxCommandCopyBufferToTexture(gfx_, zNodes, uploadZ);
     gfxTextureSetResourceState(gfx_, zNodes, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+
+    cieXbuf = gfxCreateBuffer(gfx_, 95 * sizeof(float), CIE_X);
+    cieYbuf = gfxCreateBuffer(gfx_, 95 * sizeof(float), CIE_Y);
+    cieZbuf = gfxCreateBuffer(gfx_, 95 * sizeof(float), CIE_Z);
+    cieD65  = gfxCreateBuffer(gfx_, 95 * sizeof(float), cie_d65);
 
     spectral_pt_program_ = capsaicin.createProgram(getProgramName());
     return initKernels(capsaicin);
@@ -228,6 +230,11 @@ void SpectralPT::render(CapsaicinInternal &capsaicin) noexcept
     gfxProgramSetTexture(gfx_, spectral_pt_program_, "g_RGB2SpecLUT2", rgb2SpecLUT[2]);
     gfxProgramSetParameter(gfx_, spectral_pt_program_, "g_ZNodes", zNodes);
     gfxProgramSetParameter(gfx_, spectral_pt_program_, "g_Res", rez);
+
+    gfxProgramSetParameter(gfx_, spectral_pt_program_, "g_CIE_X", cieXbuf);
+    gfxProgramSetParameter(gfx_, spectral_pt_program_, "g_CIE_Y", cieYbuf);
+    gfxProgramSetParameter(gfx_, spectral_pt_program_, "g_CIE_Z", cieZbuf);
+    gfxProgramSetParameter(gfx_, spectral_pt_program_, "g_CieD65", cieD65);
 
     stratified_sampler->addProgramParameters(capsaicin, spectral_pt_program_);
     rng->addProgramParameters(capsaicin, spectral_pt_program_);

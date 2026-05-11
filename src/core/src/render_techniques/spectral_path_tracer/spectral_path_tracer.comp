@@ -36,6 +36,11 @@ Texture2D<float4> g_ZNodes : register(t10);
 Texture2D<float4> g_RGB2SpecLUT0 : register(t11);
 Texture2D<float4> g_RGB2SpecLUT1 : register(t12);
 Texture2D<float4> g_RGB2SpecLUT2 : register(t13);
+StructuredBuffer<float> g_CIE_X : register(t0);
+StructuredBuffer<float> g_CIE_Y : register(t1);
+StructuredBuffer<float> g_CIE_Z : register(t2);
+StructuredBuffer<float> g_CieD65 : register(t3);
+
 uint2 g_BufferDimensions;
 RayCamera g_RayCamera;
 uint g_BounceCount;
@@ -94,7 +99,7 @@ void pathTracer(in uint2 pixel, in uint2 dimensions)
     pixelRay += 0.5f;
 
     // Initialise per-pixel path tracing values
-    float3 radiance = 0.0f;
+    float3 XYZ_accum = 0.0f;
 
     // Loop over requested number of samples per pixel
     for (uint sample = 0; sample < maxSamples; )
@@ -115,12 +120,16 @@ void pathTracer(in uint2 pixel, in uint2 dimensions)
 
         traceFullPath(ray, randomStratified, randomNG, minBounces, maxBounces, payload);
         
-        float3 sampleRGB = payload.rgb;
-
+        float3 sampleXYZ = payload.xyz;
+        
         // Calculate running average of samples (Welfords online algorithm)
-        radiance = radiance + ((sampleRGB - radiance) / (float) ++sample);
+        XYZ_accum = XYZ_accum + ((sampleXYZ - XYZ_accum) / (float) ++sample);
     }
-
+    const float deltaLambda = 1.0f;
+    const float N = 106.856895f;
+    XYZ_accum *= (deltaLambda / N);
+    float3 radiance = reconstructBT709(XYZ_accum);
+    
     // Check for incorrect calculations
     if (any(isnan(radiance)) || any(isinf(radiance)) || any(radiance < 0.0f))
     {

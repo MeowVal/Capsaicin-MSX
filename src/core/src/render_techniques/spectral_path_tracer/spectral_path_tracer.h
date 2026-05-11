@@ -141,6 +141,10 @@ protected:
     GfxTexture accumulationBuffer; /**< Buffer used to store pixel running average, .w= number of samples */
     GfxTexture rgb2SpecLUT[3]; /**< 3D texture for RGB to spectral conversion */
     GfxTexture zNodes; /**< 1D texture for Z nodes */
+    GfxBuffer     cieXbuf;        /**< CIE curve X sampled at 5nm intervals */
+    GfxBuffer     cieYbuf;        /**< CIE curve Y sampled at 5nm intervals */
+    GfxBuffer     cieZbuf;        /**< CIE curve Z sampled at 5nm intervals */
+    GfxBuffer     cieD65;
     uint          rez; 
     RayCamera  cameraData;
     RenderOptions options;

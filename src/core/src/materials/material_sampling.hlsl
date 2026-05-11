@@ -789,9 +789,7 @@ float sampleBRDFPDFAndEvaluateDiffuse(MaterialBRDF material, float3 normal, floa
     // Calculate shading angles
     float dotHV = saturate(dot(halfVector, viewDirection));
 #ifndef DISABLE_SPECULAR_MATERIALS
-    float dotNH = clamp(dot(normal, halfVector), -1.0f, 1.0f);
-    float dotNV = clamp(dot(normal, viewDirection), -1.0f, 1.0f);
-    reflectance = evaluateBRDF_GGX(material, dotHV, dotNH, dotNL, dotNV);
+    reflectance = evaluateBRDF(material, normal, viewDirection, lightDirection);
 #else
     reflectance = evaluateBRDFDiffuse(material, dotHV, dotNL);
 #endif
@@ -907,7 +905,7 @@ float sampleBRDFPDFAndEvaluateSpecular(MaterialBRDF material, float3 normal, flo
     float dotHV = saturate(dot(halfVector, localView));
     float dotNH = clamp(halfVector.z, -1.0f, 1.0f);
     float dotNV = clamp(localView.z, -1.0f, 1.0f);
-    reflectance = evaluateBRDF_GGX(material, dotHV, dotNH, dotNL, dotNV);
+    reflectance = evaluateBRDF(material, normal, viewDirection, lightDirection);
 
     // Calculate combined PDF for current sample
     // Note: has some duplicated calculations in evaluateBRDFSpecular and sampleGGXPDF

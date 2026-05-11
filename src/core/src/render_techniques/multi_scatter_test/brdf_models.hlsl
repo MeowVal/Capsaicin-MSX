@@ -49,8 +49,10 @@ float3 F0_from_IOR(float ior)
 }
 
 
-float3 Cook_Torrance(float3 N, float3 V, float3 L, MaterialBRDF material)
+BRDFLobes Cook_Torrance(float3 N, float3 V, float3 L, MaterialBRDF material)
 {
+    BRDFLobes r;
+    r.isMetal = (material.metallicity > 0.5f);
     float3 H = normalize(V + L);
     float rough = material.roughnessAlpha;
 
@@ -59,8 +61,14 @@ float3 Cook_Torrance(float3 N, float3 V, float3 L, MaterialBRDF material)
     float NdotH = saturate(dot(N, H));
     float VdotH = saturate(dot(V, H));
 
-    if (NdotL <= 0.0 || NdotV <= 0.0)
-        return float3(0.0, 0.0, 0.0);
+    if (NdotL <= 0.0f || NdotV <= 0.0f)
+    {
+        r.diffuse_scalar = 0.0f;
+        r.specular_shape = 0.0f;
+        r.spec_multi_shape = 0.0f;
+        r.F0_rgb = material.F0;
+        return r;
+    }
 
     // --- F0 ---
     float3 f0 = material.F0;
@@ -76,18 +84,21 @@ float3 Cook_Torrance(float3 N, float3 V, float3 L, MaterialBRDF material)
 
 
     // --- Specular ---
-    float3 spec = ((D * G * F) / (4.0 * NdotL * NdotV + 1e-5));
+    r.specular_shape = ((D * G ) / (4.0 * NdotL * NdotV + 1e-5));
 
     // --- Diffuse (energy conserving) ---
     float3 kd = (1.0f.xxx - F) * 1.05 * (1.0f - pow(1.0f - saturate(abs(VdotH)), 5.0f));
-    float3 diff = kd * material.albedo * INV_PI;
+    r.diffuse_scalar = kd.r * INV_PI;
 
-    return (diff + spec);
+    r.spec_multi_shape = 0.0f; // no MS in this model
+    r.F0_rgb = f0;
+    return r;
 }
 
-float3 Fast_MSX(float3 N, float3 V, float3 L, MaterialBRDF material)
+BRDFLobes Fast_MSX(float3 N, float3 V, float3 L, MaterialBRDF material)
 {
-
+    BRDFLobes r;
+    r.isMetal = (material.metallicity > 0.5);
     float3 H = normalize(V + L);
     float3 C = normalize(H + N);
     float rough = material.roughnessAlpha;
@@ -101,8 +112,14 @@ float3 Fast_MSX(float3 N, float3 V, float3 L, MaterialBRDF material)
     float ThetaVC = acos(CosVC);
     float ThetaM = (PI - acos(saturate(dot(V, L)))) * 0.25;
 
-    if (NdotL <= 0.0 || NdotV <= 0.0)
-        return float3(0.0, 0.0, 0.0);
+    if (NdotL <= 0.0f || NdotV <= 0.0f)
+    {
+        r.diffuse_scalar = 0.0f;
+        r.specular_shape = 0.0f;
+        r.spec_multi_shape = 0.0f;
+        r.F0_rgb = material.F0;
+        return r;
+    }
 
     // --- F0 ---
     float3 f0 = material.F0;
@@ -125,22 +142,17 @@ float3 Fast_MSX(float3 N, float3 V, float3 L, MaterialBRDF material)
     float OP = sin(ThetaVC - ThetaM) * sin(ThetaVC - ThetaM) / (sin(ThetaVC) + sin(ThetaM));
     float GI = 1.0 - max(0.0, OP);
 
-    // --- MSX Fresnel ---
-    float3 FI = F * F;
-
-    
     // --- Cook-Torrance Specular ---
-    float3 FsE = ((D * G * F) / (4.0 * NdotL * NdotV + 1e-5));
+    r.specular_shape = ((D * G ) / (4.0 * NdotL * NdotV + 1e-5));
 
     // --- MSX Specular ---
-    float3 FsI = (DI * GI * FI) / (2.0 * max(1e-4, CosVC));
-    float3 spec = FsE + FsI;
+    r.spec_multi_shape = (DI * GI) / (2.0 * max(1e-4, CosVC));
 
     // --- Diffuse (energy conserving) ---
     float3 kd = (1.0f.xxx - F) * 1.05 * (1.0f - pow(1.0f - saturate(abs(VdotH)), 5.0f));
-    float3 diff = kd * material.albedo * INV_PI;
-
-    return diff + spec;
+    r.diffuse_scalar = kd.r * INV_PI;
+    r.F0_rgb = f0;
+    return r;
 }
 float Luminance(float3 c)
 {
@@ -155,8 +167,10 @@ float Ess_Approx(float rough, float3 f0)
     return saturate(Ess); 
 }
 
-float3 Heitz(float3 N, float3 V, float3 L, MaterialBRDF material)
+BRDFLobes Heitz(float3 N, float3 V, float3 L, MaterialBRDF material)
 {
+    BRDFLobes r;
+    r.isMetal = (material.metallicity > 0.5);
     float3 H = normalize(V + L);
     float rough = material.roughnessAlpha;
 
@@ -166,7 +180,13 @@ float3 Heitz(float3 N, float3 V, float3 L, MaterialBRDF material)
     float VdotH = saturate(dot(V, H));
 
     if (NdotL <= 0.0 || NdotV <= 0.0)
-        return float3(0.0, 0.0, 0.0);
+    {
+        r.diffuse_scalar = 0.0;
+        r.specular_shape = 0.0;
+        r.spec_multi_shape = 0.0;
+        r.F0_rgb = material.F0;
+        return r;
+    }
 
     // --- F0 ---
     float3 f0 = material.F0;
@@ -181,7 +201,7 @@ float3 Heitz(float3 N, float3 V, float3 L, MaterialBRDF material)
     float G = SchlickGGX(NdotV, NdotL, rough);
 
     // --- Single-scattering specular (standard Cook-Torrance) ---
-    float3 spec_single = (D * G * F) / (4.0 * NdotL * NdotV + 1e-5);
+    r.specular_shape = (D * G ) / (4.0 * NdotL * NdotV + 1e-5);
 
     // --- Heitz-style multiple scattering ---
 
@@ -190,21 +210,19 @@ float3 Heitz(float3 N, float3 V, float3 L, MaterialBRDF material)
     float Ems = 1.0 - Ess; // energy left for multiple scattering
 
     // Average Fresnel over microfacets (simple, cheap choice)
-    float3 Favg = f0;
 
     // Broad multiple-scattering lobe (Lambert-like BRDF)
-    float3 spec_multi = Ems * Favg * INV_PI;
+    r.spec_multi_shape = Ems * INV_PI;
 
     // Per-light BRDF -> multiply by NdotL in your lighting loop
-    float3 spec = spec_single + spec_multi;
-
+    r.F0_rgb = f0;
     // --- Diffuse ---
     // Energy-conserving diffuse for dielectrics.
     // Metals (metal=1) naturally get no diffuse.
     float3 kd = (1.0f.xxx - F) * 1.05 * (1.0f - pow(1.0f - saturate(abs(VdotH)), 5.0f));
-    float3 diff = kd * material.albedo * INV_PI;
+    r.diffuse_scalar = kd.r * INV_PI;
 
-    return diff + spec;
+    return r;
 }
 float P22_StudentT(float sx, float sy, float alpha, float gamma)
 {
@@ -266,9 +284,11 @@ float G_StudentT(float3 V_local, float3 L_local,
     float Gl = G1_StudentT(L_local, alpha, gamma);
     return Gv * Gl;
 }
-float3 StudentT_BRDF( float3 N, float3 V, float3 L,
+BRDFLobes StudentT_BRDF(float3 N, float3 V, float3 L,
     MaterialBRDF material)
 {
+    BRDFLobes r;
+    r.isMetal = (material.metallicity > 0.5);
     float3 H = normalize(V + L);
     material.gamma = 3.0; // tail heaviness parameter, controls the "sharpness of the distribution's tails
     float alpha = material.roughnessAlpha; // isotropic
@@ -285,7 +305,13 @@ float3 StudentT_BRDF( float3 N, float3 V, float3 L,
     float VdotH = saturate(dot(V, H));
 
     if (NdotV <= 0.0 || NdotL <= 0.0)
-        return 0.0.xxx;
+    {
+        r.diffuse_scalar = 0.0;
+        r.specular_shape = 0.0;
+        r.spec_multi_shape = 0.0;
+        r.F0_rgb = material.F0;
+        return r;
+    }
     float3 F0 = material.F0;;
     // Fresnel
     float3 F = Fresnel_Schlick(VdotH, F0);
@@ -296,18 +322,19 @@ float3 StudentT_BRDF( float3 N, float3 V, float3 L,
     // Geometry from sigma-approx G1
     float G = G_StudentT(V_local, L_local, alpha, material.gamma);
 
-    float3 spec_single = (D * G * F) / (4.0 * NdotV * NdotL + 1e-5);
+    r.specular_shape = (D * G ) / (4.0 * NdotV * NdotL + 1e-5);
 
     // reuse of Heitz MS term 
     float rough_iso = 0.5 * (alpha + alpha);
     float Ess = Ess_Approx(rough_iso, F0);
     float Ems = 1.0 - Ess;
-    float3 spec_multi = Ems * F0 * INV_PI;
+    r.spec_multi_shape = Ems * INV_PI;
 
+    r.F0_rgb = F0;
     float3 kd = (1.0f.xxx - F) * 1.05 * (1.0f - pow(1.0f - saturate(abs(VdotH)), 5.0f));
-    float3 diff = kd * material.albedo * INV_PI;
+    r.diffuse_scalar = kd.r * INV_PI;
 
-    return diff + spec_single + spec_multi;
+    return r;
 }
 
 

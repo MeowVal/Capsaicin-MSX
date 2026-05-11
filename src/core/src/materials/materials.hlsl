@@ -33,13 +33,27 @@ SamplerState g_TextureSampler;
 /** Material data representing a material already evaluated at a specific UV coordinate. */
 struct MaterialEvaluated
 {
-    float3 albedo;
+    float3 albedo_linear;
+    float3 albedo_srgb_nl;
 #ifndef DISABLE_SPECULAR_MATERIALS
     float metallicity;
     float roughness;
 #endif
 };
 
+float3 srgb_to_linear(float3 c)
+{
+    float3 lo = c / 12.92;
+    float3 hi = pow((c + 0.055) / 1.055, 2.4);
+    return lerp(hi, lo, c <= 0.04045);
+}
+
+float3 linear_to_srgb(float3 c)
+{
+    float3 lo = c * 12.92;
+    float3 hi = 1.055 * pow(c, 1.0 / 2.4) - 0.055;
+    return lerp(hi, lo, c <= 0.0031308);
+}
 /**
  * Calculates material data by evaluating any texture data.
  * @param material The material to evaluate.
@@ -49,11 +63,25 @@ struct MaterialEvaluated
 MaterialEvaluated MakeMaterialEvaluated(Material material, float2 uv)
 {
     // Load initial values and any textures
-    float3 albedo = material.albedo.xyz;
+    float3 albedo_linear;
+    float3 albedo_srgb_nl;
+    float3 base = material.albedo.xyz;
     uint albedoTex = asuint(material.albedo.w);
     if (albedoTex != uint(-1))
     {
-        albedo *= g_TextureMaps[NonUniformResourceIndex(albedoTex)].SampleLevel(g_TextureSampler, uv, 0.0f).xyz;
+        float3 tex_srgb = g_TextureMaps[NonUniformResourceIndex(albedoTex)].SampleLevel(g_TextureSampler, uv, 0.0f).xyz;
+        float3 base_srgb = linear_to_srgb(base);
+
+        float3 final_srgb = tex_srgb * base_srgb;
+
+        albedo_srgb_nl = final_srgb;
+        albedo_linear = srgb_to_linear(final_srgb);
+    }
+    else
+    {
+    // Pure RGB is linear BT.709
+        albedo_linear = base;
+        albedo_srgb_nl = linear_to_srgb(base);
     }
 
 #ifndef DISABLE_SPECULAR_MATERIALS
@@ -74,7 +102,8 @@ MaterialEvaluated MakeMaterialEvaluated(Material material, float2 uv)
 
     MaterialEvaluated ret =
     {
-        albedo,
+        albedo_linear,
+        albedo_srgb_nl,
 #ifndef DISABLE_SPECULAR_MATERIALS
         metallicity,
         roughness
@@ -94,11 +123,25 @@ MaterialEvaluated MakeMaterialEvaluated(Material material, float2 uv)
 MaterialEvaluated MakeMaterialEvaluated(Material material, float2 uv, float2 gradX, float2 gradY)
 {
     // Load initial values and any textures
-    float3 albedo = material.albedo.xyz;
+    float3 albedo_linear;
+    float3 albedo_srgb_nl;
+    float3 base = material.albedo.xyz;
     uint albedoTex = asuint(material.albedo.w);
     if (albedoTex != uint(-1))
     {
-        albedo *= g_TextureMaps[NonUniformResourceIndex(albedoTex)].SampleGrad(g_TextureSampler, uv, gradX, gradY).xyz;
+        float3 tex_srgb = g_TextureMaps[NonUniformResourceIndex(albedoTex)].SampleLevel(g_TextureSampler, uv, 0.0f).xyz;
+        float3 base_srgb = linear_to_srgb(base);
+
+        float3 final_srgb = tex_srgb * base_srgb;
+
+        albedo_srgb_nl = final_srgb;
+        albedo_linear = srgb_to_linear(final_srgb);
+    }
+    else
+    {
+    // Pure RGB is linear BT.709
+        albedo_linear = base;
+        albedo_srgb_nl = linear_to_srgb(base);
     }
 
 #ifndef DISABLE_SPECULAR_MATERIALS
@@ -119,7 +162,8 @@ MaterialEvaluated MakeMaterialEvaluated(Material material, float2 uv, float2 gra
 
     MaterialEvaluated ret =
     {
-        albedo,
+        albedo_linear,
+        albedo_srgb_nl,
 #ifndef DISABLE_SPECULAR_MATERIALS
         metallicity,
         roughness
@@ -140,7 +184,9 @@ enum BRDFType : uint
 struct MaterialBRDF
 {
     float3 albedo;
+    float3 albedo_srgb_nl;
     uint brdfType;
+    float metallicity;
     float gamma;
     uint mpmlIndex;
 #ifndef DISABLE_SPECULAR_MATERIALS
@@ -192,7 +238,8 @@ float ClampAlphaRoughness(const float alpha)
  */
 MaterialBRDF MakeMaterialBRDF(MaterialEvaluated material, uint brdfType)
 {
-    float3 albedo = material.albedo;
+    float3 albedo = material.albedo_linear;
+    float3 albedo_srgb_nl = material.albedo_srgb_nl;
 #ifndef DISABLE_SPECULAR_MATERIALS
     // Calculate albedo/F0 using metallicity
     float3 F0 = lerp(0.04f.xxx, albedo, material.metallicity);
@@ -203,8 +250,10 @@ MaterialBRDF MakeMaterialBRDF(MaterialEvaluated material, uint brdfType)
     MaterialBRDF ret =
     {
         albedo,
+        albedo_srgb_nl,
         (BRDFType)brdfType,
-    3,
+        material.metallicity,
+     3,
      0,
 #ifndef DISABLE_SPECULAR_MATERIALS
         roughnessAlpha,
@@ -365,7 +414,9 @@ MaterialBSDF MakeMaterialBSDF(Material material, float2 uv, BRDFType brdfType)
     MaterialBSDF ret =
     {
         materialBRDF.albedo,
+        materialBRDF.albedo_srgb_nl,
         materialBRDF.brdfType,
+        materialBRDF.metallicity,
         materialBRDF.gamma,
         materialBRDF.mpmlIndex,
 #ifndef DISABLE_SPECULAR_MATERIALS
@@ -404,7 +455,9 @@ MaterialBSDF MakeMaterialBSDF(Material material, float2 uv, float2 gradX, float2
     MaterialBSDF ret =
     {
         materialBRDF.albedo,
+        materialBRDF.albedo_srgb_nl,
         materialBRDF.brdfType,
+        materialBRDF.metallicity,
         materialBRDF.gamma,
         materialBRDF.mpmlIndex,
 #ifndef DISABLE_SPECULAR_MATERIALS
@@ -427,7 +480,9 @@ MaterialBRDF MakeMaterialBRDF(MaterialBSDF material)
     MaterialBRDF ret =
     {
         material.albedo,
+        material.albedo_srgb_nl,
         material.brdfType,
+        material.metallicity,
         material.gamma,
         material.mpmlIndex,
 #ifndef DISABLE_SPECULAR_MATERIALS
@@ -454,9 +509,9 @@ uint packMaterial(MaterialEvaluated material)
     return albedo;
 #else
     // Pack albedo color onto 5-6-5 format, i.e. 16 bits
-    uint albedo = (uint(pow(saturate(material.albedo.x), 1.0f / 2.2f) * 31.0f) << 11)
-                | (uint(pow(saturate(material.albedo.y), 1.0f / 2.2f) * 63.0f) << 5)
-                | (uint(pow(saturate(material.albedo.z), 1.0f / 2.2f) * 31.0f) << 0);
+    uint albedo = (uint(pow(saturate(material.albedo_linear.x), 1.0f / 2.2f) * 31.0f) << 11)
+                | (uint(pow(saturate(material.albedo_linear.y), 1.0f / 2.2f) * 63.0f) << 5)
+                | (uint(pow(saturate(material.albedo_linear.z), 1.0f / 2.2f) * 31.0f) << 0);
 
     // Pack metallicity and roughness onto 8 bits each
     uint metallicityRoughness = (uint(saturate(material.metallicity) * 255.0f) << 8)
@@ -486,7 +541,7 @@ MaterialBRDF unpackMaterial(in uint packedMaterial)
     MaterialEvaluated material2;
     // Unpack the albedo
     uint albedo = (packedMaterial >> 16);
-    material2.albedo = float3(
+    material2.albedo_linear = float3(
         pow(((albedo >> 11) & 0x1Fu) / 31.0f, 2.2f),
         pow(((albedo >> 5) & 0x3Fu) / 63.0f, 2.2f),
         pow(((albedo >> 0) & 0x1Fu) / 31.0f, 2.2f)
@@ -523,7 +578,7 @@ float rgbToSpectrum(float3 rgb, float lambda)
 }
 MaterialSpectral MakeMaterialSpectral(MaterialEvaluated material, float wavelength, float n_val, float k_val, float sigma_a_val, float sigma_s_val, float g_val)
 {
-    float3 rgb = material.albedo.xyz;
+    float3 rgb = material.albedo_linear.xyz;
     float reflectance = rgbToSpectrum(rgb, wavelength);
     float roughnessAlpha = ClampAlphaRoughness(ConvertPerceptualRoughnessToAlpha(material.roughness));
     float roughnessAlphaSqr = ClampAlphaRoughness(roughnessAlpha * roughnessAlpha);

@@ -39,6 +39,11 @@ Texture2D<float4> g_ZNodes;
 Texture2D<float4> g_RGB2SpecLUT0;
 Texture2D<float4> g_RGB2SpecLUT1;
 Texture2D<float4> g_RGB2SpecLUT2;
+StructuredBuffer<float> g_CIE_X;
+StructuredBuffer<float> g_CIE_Y;
+StructuredBuffer<float> g_CIE_Z;
+StructuredBuffer<float> g_CieD65;
+
 StructuredBuffer<Instance> g_InstanceBuffer;
 StructuredBuffer<float3x4> g_TransformBuffer;
 StructuredBuffer<uint> g_IndexBuffer;

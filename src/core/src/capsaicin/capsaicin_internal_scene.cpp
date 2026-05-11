@@ -1656,6 +1656,8 @@ void CapsaicinInternal::updateSceneMaterials() noexcept
                 GfxTexture &texture = texture_atlas_[image_index];
 
                 const DXGI_FORMAT format         = image_ref->format;
+                GFX_PRINTLN("format = %u", (uint32_t)image_ref->format);
+                GFX_PRINTLN("test");
                 uint32_t const    image_width    = image_ref->width;
                 uint32_t const    image_height   = image_ref->height;
                 uint32_t const    image_mips     = gfxCalculateMipCount(image_width, image_height);

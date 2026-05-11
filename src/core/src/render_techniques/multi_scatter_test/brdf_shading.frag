@@ -138,15 +138,7 @@ float4 main(float4 pos : SV_Position) : SV_Target0
         
         float3 radiance = evaluateLight(light, worldPos, L);
         
-        float3 f;
-        if (g_BRDFModel == 0)
-            f = Cook_Torrance(N, V, L, brdf);
-        else if (g_BRDFModel == 1)
-            f = Fast_MSX(N, V, L, brdf);
-        else if (g_BRDFModel == 2)
-            f = Heitz(N, V, L, brdf);
-        else if (g_BRDFModel == 3)
-            f = StudentT_BRDF(N, V, L, brdf);
+        float3 f = evaluateBRDF(brdf, N, V, L);
         
         totalLighting += f * radiance * NdotL;
     }
