@@ -47,7 +47,7 @@ public:
 
     struct RenderOptions
     {
-        uint      brdf_model               = 0;
+        int      brdf_model               = 0;
         uint32_t spectral_pt_bounce_count = 30; /**< Maximum number of bounces each path can take */
         uint32_t spectral_pt_min_rr_bounces =
             2; /**< Number of bounces a path takes before Russian roulette can be used */
@@ -85,6 +85,7 @@ public:
      */
     [[nodiscard]] SharedTextureList getSharedTextures() const noexcept override;
 
+  
     /**
      * Initialise any internal data or state.
      * @note This is automatically called by the framework after construction and should be used to create

@@ -33,7 +33,7 @@ public:
 		 * strings and variants *****/
 		/***** Example: bool my_technique_enable;                     *****/
 		//bool CookTorrance = true; /**< Example option to toggle between Cook-Torrance and Blinn-Phong BRDFs */
-		uint  brdf_model   = 0; // 0=CookTorrance, 1=Fast-MSX, 2=Heitz, 3= GGX
+		int  brdf_model   = 0; // 0=CookTorrance, 1=Fast-MSX, 2=Heitz, 3= GGX
 	};
 
 	/**

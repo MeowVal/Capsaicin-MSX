@@ -153,7 +153,7 @@ float3 LookupRGB2SpecCoeffs( float3 rgb )
     float dx = x - xi, dy = y - yi, dz = (z - g_ZNodes.Load(int3(zi, 0, 0)).x) / (g_ZNodes.Load(int3(zi + 1, 0, 0)).x - g_ZNodes.Load(int3(zi, 0, 0)).x);
     dz = saturate(dz);
 
-    uint sliceIndex = zi * Res + yi;   // [0, Res*Res-1]
+    uint sliceIndex = yi + zi * Res; // [0, Res*Res-1]
     int2 texel      = int2(xi, sliceIndex);
 
     float3 c000;
@@ -201,24 +201,26 @@ float RGBToSpectrumTableSingle(float lambda, float3 rgb)
 {
     
     float3 sRGB = rgb;
-    float scale = max(max(sRGB.r, sRGB.g), sRGB.b);
-    float3 chroma = (scale > 0.0f) ? sRGB / scale : float3(0, 0, 0);
-    float3 coeffs = LookupRGB2SpecCoeffs(chroma);
-    return s(EvaluatePolynomial(lambda, coeffs.x, coeffs.y, coeffs.z)) * scale;
+    float m = max(max(sRGB.r, sRGB.g), sRGB.b);
+    float scale = 2.0f * m;
+    float3 remapped = (scale > 0.0f) ? sRGB / scale : float3(0.0f, 0.0f, 0.0f);
+    float3 coeffs = LookupRGB2SpecCoeffs(remapped);
+    float x = EvaluatePolynomial(lambda, coeffs.x, coeffs.y, coeffs.z);
+    return s(x) * scale;
+
 }
 float RGBToSpectrumTable1(float lambda, float3 coeffs)
 {
-    
-    float t = (lambda - g_LambdaMin) / (g_LambdaMax - g_LambdaMin);
-    return s(EvaluatePolynomial(t, coeffs.z, coeffs.y, coeffs.x));;
+    return s(EvaluatePolynomial(lambda, coeffs.x, coeffs.y, coeffs.z));;
 }
 float3 RGBToSpectrumTable3(float3 lambda_nm, float3 rgb)
 {
-    float3 sRGB = float3(1,0,0);
-    float scale = max(max(sRGB.r, sRGB.g), sRGB.b);
-    float3 chroma = (scale > 0.0f) ? sRGB / scale : float3(0, 0, 0);
+    float3 sRGB = rgb;
+    float m = max(max(sRGB.r, sRGB.g), sRGB.b);
+    float scale = 2.0f * m;
+    float3 remapped = (scale > 0.0f) ? sRGB / scale : float3(0.0f, 0.0f, 0.0f);
 
-    float3 coeffs = LookupRGB2SpecCoeffs(chroma);
+    float3 coeffs = LookupRGB2SpecCoeffs(remapped);
     return float3(
         RGBToSpectrumTable1(lambda_nm.x, coeffs) * scale,
         RGBToSpectrumTable1(lambda_nm.y, coeffs) * scale,
@@ -276,18 +278,28 @@ float3 PBRTCie1931(float lambda)
 
     return float3(x, y, z);
 }
+
 float3 HeroWavelengthContribution(float lambda, float L_lambda, float pdf_lambda)
 {
-    float t = (lambda - g_LambdaMin) / (g_LambdaMax - g_LambdaMin);
-    return (PBRTCie1931(lambda) * L_lambda) / pdf_lambda;
+    float3 xyz = (PBRTCie1931(lambda) * L_lambda) / pdf_lambda;
+    
+    return xyz;
+}
+float3 HeroWavelengthContribution3(float3 lambda, float3 L_lambda, float3 pdf_lambda)
+{
+    float3 xyz = 0;
+    xyz += HeroWavelengthContribution(lambda.x, L_lambda.x, pdf_lambda.x);
+    xyz += HeroWavelengthContribution(lambda.y, L_lambda.y, pdf_lambda.y);
+    xyz += HeroWavelengthContribution(lambda.z, L_lambda.z, pdf_lambda.z);  
+    xyz /= 3.0f;
+    
+    return xyz;
 }
 float3 SpectralToXYZSingle(float lambda, float T_lambda, float pdf_lambda)
 {
     float3 xyz = 0;
 
     xyz += (PBRTCie1931(lambda) * T_lambda) / pdf_lambda;
-
-    //xyz = convertBT709ToXYZ(float3(1, 0, 0));
     return xyz;
 }
 
@@ -318,7 +330,7 @@ float3 WymanCie1931_3(float3 lambda, float3 T_Lambda, float3 pdf_lambda)
 }
 float3 reconstructBT709(float3 XYZ)
 {
-    float3 rgb = convertXYZToBT709(XYZ);
+    float3 rgb = convertXYZToBT709Adaptation(XYZ);
     return max(rgb, 0.0.xxx);
 }
 float3 SpectralToXYZ_Flat(float3 lambda, float3 T_Lambda, float3 pdf_lambda)

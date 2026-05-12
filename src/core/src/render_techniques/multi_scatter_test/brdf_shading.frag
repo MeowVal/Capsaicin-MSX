@@ -19,7 +19,15 @@ Texture2D g_RoughnessBuffer;
 Texture2D g_VisibilityBuffer;
 Texture2D g_OcclusionAndBentNormalBuffer;
 
-
+uint g_Res;
+Texture2D<float4> g_ZNodes;
+Texture2D<float4> g_RGB2SpecLUT0;
+Texture2D<float4> g_RGB2SpecLUT1;
+Texture2D<float4> g_RGB2SpecLUT2;
+StructuredBuffer<float> g_CIE_X;
+StructuredBuffer<float> g_CIE_Y;
+StructuredBuffer<float> g_CIE_Z;
+StructuredBuffer<float> g_CieD65;
 //Texture2D g_LutBuffer;
 //uint g_LutSize;
 
@@ -49,7 +57,7 @@ SamplerState g_TextureSampler;
 #include "materials/material_evaluation.hlsl"
 #include "materials/material_sampling.hlsl"
 #include "math/transform.hlsl"
-
+#include "render_techniques/spectral_path_tracer/spectral.hlsl"
 #include "brdf_models.hlsl"
 
 
@@ -148,5 +156,6 @@ float4 main(float4 pos : SV_Position) : SV_Target0
     //return visibility;
     //return float4(primitiveID / 255, 0, 0, 1);
     //return float4(brdf.albedo,1);
+   
 
 }

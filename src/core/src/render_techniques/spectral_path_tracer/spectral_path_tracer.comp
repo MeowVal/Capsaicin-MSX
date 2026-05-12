@@ -40,6 +40,7 @@ StructuredBuffer<float> g_CIE_X : register(t0);
 StructuredBuffer<float> g_CIE_Y : register(t1);
 StructuredBuffer<float> g_CIE_Z : register(t2);
 StructuredBuffer<float> g_CieD65 : register(t3);
+RWStructuredBuffer<float3> DebugBuffer : register(u5);
 
 uint2 g_BufferDimensions;
 RayCamera g_RayCamera;
@@ -49,7 +50,7 @@ uint g_SampleCount;
 uint g_Accumulate;
 
 uint g_FrameIndex;
-
+uint g_BRDFModel;
 
 StructuredBuffer<Instance> g_InstanceBuffer;
 StructuredBuffer<float3x4> g_TransformBuffer;
@@ -129,7 +130,6 @@ void pathTracer(in uint2 pixel, in uint2 dimensions)
     const float N = 106.856895f;
     XYZ_accum *= (deltaLambda / N);
     float3 radiance = reconstructBT709(XYZ_accum);
-    
     // Check for incorrect calculations
     if (any(isnan(radiance)) || any(isinf(radiance)) || any(radiance < 0.0f))
     {

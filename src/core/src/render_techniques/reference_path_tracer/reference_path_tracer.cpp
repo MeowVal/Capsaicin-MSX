@@ -100,6 +100,8 @@ SharedTextureList ReferencePT::getSharedTextures() const noexcept
     return textures;
 }
 
+
+
 bool ReferencePT::init(CapsaicinInternal const &capsaicin) noexcept
 {
     rayCameraData = gfxCreateBuffer<RayCamera>(gfx_, 1, nullptr, kGfxCpuAccess_Write);
@@ -166,6 +168,7 @@ void ReferencePT::render(CapsaicinInternal &capsaicin) noexcept
         gfx_, reference_pt_program_, "g_BounceRRCount", options.reference_pt_min_rr_bounces);
     gfxProgramSetParameter(gfx_, reference_pt_program_, "g_SampleCount", options.reference_pt_sample_count);
     gfxProgramSetParameter(gfx_, reference_pt_program_, "g_Accumulate", accumulate ? 1 : 0);
+    gfxProgramSetParameter(gfx_, reference_pt_program_, "g_BRDFModel", options.brdf_model);
 
     stratified_sampler->addProgramParameters(capsaicin, reference_pt_program_);
     rng->addProgramParameters(capsaicin, reference_pt_program_);
@@ -178,6 +181,7 @@ void ReferencePT::render(CapsaicinInternal &capsaicin) noexcept
     gfxProgramSetParameter(gfx_, reference_pt_program_, "g_MaterialBuffer", capsaicin.getMaterialBuffer());
 
     gfxProgramSetParameter(gfx_, reference_pt_program_, "g_AccumulationBuffer", accumulationBuffer);
+ 
     gfxProgramSetParameter(
         gfx_, reference_pt_program_, "g_OutputBuffer", capsaicin.getSharedTexture("Color"));
 
@@ -230,6 +234,11 @@ void ReferencePT::terminate() noexcept
 
 void ReferencePT::renderGUI(CapsaicinInternal &capsaicin) const noexcept
 {
+    int model = options.brdf_model;
+    if (ImGui::Combo("BRDF Model", &model, "GGX\0CookTorrance\0Fast-MSX\0Heitz\0StudentT\0"))
+    {
+        capsaicin.setOption("brdf_model", model);
+    }
     ImGui::DragInt("Samples Per Pixel",
         reinterpret_cast<int32_t *>(&capsaicin.getOption<uint32_t>("reference_pt_sample_count")), 1, 1, 30);
     auto &bounces = capsaicin.getOption<uint32_t>("reference_pt_bounce_count");

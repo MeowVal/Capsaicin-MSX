@@ -106,6 +106,7 @@ SharedTextureList SpectralPT::getSharedTextures() const noexcept
     return textures;
 }
 
+
 bool SpectralPT::init(CapsaicinInternal const &capsaicin) noexcept
 {
     rez           = sRGBToSpectrumTable_Res;
@@ -224,6 +225,7 @@ void SpectralPT::render(CapsaicinInternal &capsaicin) noexcept
         gfx_, spectral_pt_program_, "g_BounceRRCount", options.spectral_pt_min_rr_bounces);
     gfxProgramSetParameter(gfx_, spectral_pt_program_, "g_SampleCount", options.spectral_pt_sample_count);
     gfxProgramSetParameter(gfx_, spectral_pt_program_, "g_Accumulate", accumulate ? 1 : 0);
+    gfxProgramSetParameter(gfx_, spectral_pt_program_, "g_BRDFModel", options.brdf_model);
 
     gfxProgramSetTexture(gfx_, spectral_pt_program_, "g_RGB2SpecLUT0", rgb2SpecLUT[0]);
     gfxProgramSetTexture(gfx_, spectral_pt_program_, "g_RGB2SpecLUT1", rgb2SpecLUT[1]);
@@ -308,6 +310,11 @@ void SpectralPT::terminate() noexcept
 
 void SpectralPT::renderGUI(CapsaicinInternal &capsaicin) const noexcept
 {
+    int model = options.brdf_model;
+    if (ImGui::Combo("BRDF Model", &model, "GGX\0CookTorrance\0Fast-MSX\0Heitz\0StudentT\0"))
+    {
+        capsaicin.setOption("brdf_model", model);
+    }
     ImGui::DragInt("Samples Per Pixel",
         reinterpret_cast<int32_t *>(&capsaicin.getOption<uint32_t>("spectral_pt_sample_count")), 1, 1, 30);
     auto &bounces = capsaicin.getOption<uint32_t>("spectral_pt_bounce_count");
