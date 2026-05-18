@@ -31,6 +31,52 @@ float SampleVisibleWavelengths(float u)
 
     return 538.0f - 138.888889f * atanh_approx(0.85691062f - 1.82750197f * u);
 }
+ /// Wyman et al. Simple Analytic Approximations to the CIE XYZ Color Matching Functions
+float xFit_1931(float wave)
+{
+    float t1 = (wave - 442.0f) * ((wave < 442.0f) ? 0.0624f : 0.0374f);
+    float t2 = (wave - 599.8f) * ((wave < 599.8f) ? 0.0264f : 0.0323f);
+    float t3 = (wave - 501.1f) * ((wave < 501.1f) ? 0.0490f : 0.0382f);
+    return 0.362f * exp(-0.5f * t1 * t1) + 1.056f * exp(-0.5f * t2 * t2) - 0.065f * exp(-0.5f * t3 * t3);
+}
+float yFit_1931(float wave)
+{
+    float t1 = (wave - 568.8f) * ((wave < 568.8f) ? 0.0213f : 0.0247f);
+    float t2 = (wave - 530.9f) * ((wave < 530.9f) ? 0.0613f : 0.0322f);
+    return 0.821f * exp(-0.5f * t1 * t1) + 0.286f * exp(-0.5f * t2 * t2);
+}
+float zFit_1931(float wave)
+{
+    float t1 = (wave - 437.0f) * ((wave < 437.0f) ? 0.0845f : 0.0278f);
+    float t2 = (wave - 459.0f) * ((wave < 459.0f) ? 0.0385f : 0.0725f);
+    return 1.217f * exp(-0.5f * t1 * t1) + 0.681f * exp(-0.5f * t2 * t2);
+}
+/// Wyman et al. Simple Analytic Approximations to the CIE XYZ Color Matching Functions
+float ComputeCMFScale()
+{
+    float3 XYZ_white = float3(0, 0, 0);
+
+    for (float lambda = 360.0; lambda <= 830.0; lambda += 5.0)
+    {
+        float pdf = VisibleWavelengthsPDF(lambda);
+        float3 cmf = float3(
+            xFit_1931(lambda),
+            yFit_1931(lambda),
+            zFit_1931(lambda)
+        ) / pdf;
+
+        XYZ_white += cmf;
+    }
+
+    XYZ_white *= 5.0; // nm step
+    const float3x3 XYZ_to_BT709 = float3x3(3.240835667f, -1.537319541f, -0.4985901117f,
+        -0.9692294598f, 1.875940084f, 0.04155444726f,
+        0.05564493686f, -0.2040314376f, 1.057253838f);
+    float3 rgbWhite = mul(XYZ_to_BT709, XYZ_white);
+
+    return (1.0 / rgbWhite.y) * 235; // WB1 normalization   (1.0 / rgbWhite.y) * 235
+}
+static float CMF_SCALE = ComputeCMFScale();
 void sampleHeroWavelength(inout Random rng, out float lambda, out float pdf)
 {
     float u = rng.rand();
@@ -195,19 +241,60 @@ float3 LookupRGB2SpecCoeffs( float3 rgb )
 
     return lerp(c0z, c1z, dz);
 }
+float3 computeJH19Coeffs(float3 rgb)
+{
+    float r = rgb.r, g = rgb.g, b = rgb.b;
 
+    float3 coeffs;
 
+    // These are the fitted coefficients from the paper
+    coeffs.x = 1.0 * r + -1.0 * g + 0.0 * b;
+    coeffs.y = -0.5 * r + 1.5 * g + 0.0 * b;
+    coeffs.z = 0.0 * r + -1.0 * g + 1.0 * b;
+
+    return coeffs;
+}
+float basis0(float lambda)
+{
+    return exp(-0.5 * pow((lambda - 610.0) / 45.0, 2.0));
+}
+
+float basis1(float lambda)
+{
+    return exp(-0.5 * pow((lambda - 530.0) / 30.0, 2.0));
+}
+
+float basis2(float lambda)
+{
+    return exp(-0.5 * pow((lambda - 460.0) / 25.0, 2.0));
+}
+float evalSpectrum(float lambda, float3 coeffs)
+{
+    return coeffs.x * basis0(lambda)
+         + coeffs.y * basis1(lambda)
+         + coeffs.z * basis2(lambda);
+}
+float3 RGBToSpectrum_JH19(float3 lambda_nm, float3 rgb)
+{
+    float3 coeffs = computeJH19Coeffs(rgb);
+
+    return float3(
+        evalSpectrum(lambda_nm.x, coeffs),
+        evalSpectrum(lambda_nm.y, coeffs),
+        evalSpectrum(lambda_nm.z, coeffs)
+    );
+}
 float RGBToSpectrumTableSingle(float lambda, float3 rgb)
 {
     
     float3 sRGB = rgb;
     float m = max(max(sRGB.r, sRGB.g), sRGB.b);
-    float scale = 2.0f * m;
-    float3 remapped = (scale > 0.0f) ? sRGB / scale : float3(0.0f, 0.0f, 0.0f);
+    if (m <= 0.0f)
+        return 0.0;
+    float3 remapped = sRGB / m;
     float3 coeffs = LookupRGB2SpecCoeffs(remapped);
     float x = EvaluatePolynomial(lambda, coeffs.x, coeffs.y, coeffs.z);
-    return s(x) * scale;
-
+    return s(x) * m;
 }
 float RGBToSpectrumTable1(float lambda, float3 coeffs)
 {
@@ -217,14 +304,15 @@ float3 RGBToSpectrumTable3(float3 lambda_nm, float3 rgb)
 {
     float3 sRGB = rgb;
     float m = max(max(sRGB.r, sRGB.g), sRGB.b);
-    float scale = 2.0f * m;
-    float3 remapped = (scale > 0.0f) ? sRGB / scale : float3(0.0f, 0.0f, 0.0f);
+    if (m <= 0.0f)
+        return 0.0.xxx;
+    float3 remapped =  sRGB / m ;
 
     float3 coeffs = LookupRGB2SpecCoeffs(remapped);
     return float3(
-        RGBToSpectrumTable1(lambda_nm.x, coeffs) * scale,
-        RGBToSpectrumTable1(lambda_nm.y, coeffs) * scale,
-        RGBToSpectrumTable1(lambda_nm.z, coeffs) * scale
+        RGBToSpectrumTable1(lambda_nm.x, coeffs) * m,
+        RGBToSpectrumTable1(lambda_nm.y, coeffs) * m,
+        RGBToSpectrumTable1(lambda_nm.z, coeffs) * m
     );
     //return LookupRGB2SpecCoeffs(chroma);
 }
@@ -232,26 +320,7 @@ float3 RGBToSpectrumTable3(float3 lambda_nm, float3 rgb)
 
 
 
-/// Wyman et al. Simple Analytic Approximations to the CIE XYZ Color Matching Functions
-float xFit_1931( float wave )
-{
-    float t1 = (wave-442.0f)*((wave<442.0f)?0.0624f:0.0374f);
-    float t2 = (wave-599.8f)*((wave<599.8f)?0.0264f:0.0323f);
-    float t3 = (wave-501.1f)*((wave<501.1f)?0.0490f:0.0382f);
-    return 0.362f*exp(-0.5f*t1*t1) + 1.056f*exp(-0.5f*t2*t2) - 0.065f*exp(-0.5f*t3*t3);
-}
-float yFit_1931( float wave )
-{
-    float t1 = (wave-568.8f)*((wave<568.8f)?0.0213f:0.0247f);
-    float t2 = (wave-530.9f)*((wave<530.9f)?0.0613f:0.0322f);
-    return 0.821f*exp(-0.5f*t1*t1) + 0.286f*exp(-0.5f*t2*t2);
-}
-float zFit_1931( float wave )
-{
-    float t1 = (wave-437.0f)*((wave<437.0f)?0.0845f:0.0278f);
-    float t2 = (wave-459.0f)*((wave<459.0f)?0.0385f:0.0725f);
-    return 1.217f*exp(-0.5f*t1*t1) + 0.681f*exp(-0.5f*t2*t2);
-}
+
 /// Wyman et al. Simple Analytic Approximations to the CIE XYZ Color Matching Functions
 float3 WymanCie1931(float lambda, float T_Lambda)
 {
@@ -278,10 +347,17 @@ float3 PBRTCie1931(float lambda)
 
     return float3(x, y, z);
 }
-
+float3 PBRT_CMF(float lambda)
+{
+    return float3(
+        xFit_1931(lambda),
+        yFit_1931(lambda),
+        zFit_1931(lambda)
+    ) * CMF_SCALE;
+}
 float3 HeroWavelengthContribution(float lambda, float L_lambda, float pdf_lambda)
 {
-    float3 xyz = (PBRTCie1931(lambda) * L_lambda) / pdf_lambda;
+    float3 xyz = (PBRT_CMF(lambda) * L_lambda) / pdf_lambda;
     
     return xyz;
 }
@@ -382,6 +458,11 @@ float FresnelSchlickScalar(float VdotH, float f0Lambda)
     float F90 = 1.0;
     return f0Lambda + (F90 - f0Lambda) * pow(1.0 - saturate(abs(VdotH)), 5.0);
 }
+float3 FresnelSchlickScalar3(float VdotH, float3 f0Lambda)
+{
+    float F90 = 1.0f;
+    return f0Lambda + (F90 - f0Lambda) * pow(1.0 - saturate(abs(VdotH)), 5.0);
+}
 float reconstructSpectral(BRDFLobes lobes,
                           MaterialBRDF material,
                           float lambda,
@@ -390,7 +471,7 @@ float reconstructSpectral(BRDFLobes lobes,
     // Diffuse
     float albedo_lambda = RGBToSpectrumTableSingle(lambda, material.albedo);
 
-    float diffuseLambda = albedo_lambda * lobes.diffuse_scalar;
+    float diffuseLambda = albedo_lambda * lobes.diffuseShape;
 
     // Specular
     float specularLambda = 0.0;
@@ -400,17 +481,52 @@ float reconstructSpectral(BRDFLobes lobes,
         // Dielectric → achromatic Fresnel
         float F0 = 0.04;
         float F = FresnelSchlickScalar(dotHV, F0);
-        specularLambda = lobes.specular_shape * F;
+        specularLambda = lobes.specularSingleShape * F;
     }
     else
     {
         // Metal → spectral F0
-        float f0Lambda = RGBToSpectrumTableSingle(lambda, lobes.F0_rgb);
+        float f0Lambda = RGBToSpectrumTableSingle(lambda, lobes.F0Rgb);
         float fLambda = FresnelSchlickScalar(dotHV, f0Lambda);
-        specularLambda = lobes.specular_shape * fLambda;
+        specularLambda = lobes.specularSingleShape * fLambda;
     }
 
     return (diffuseLambda + specularLambda) * saturate(dotNL);
+}
+float3 reconstructSpectral3(BRDFLobes lobes,
+                          MaterialBRDF material,
+                          float3 lambda,
+                          float dotNL, float dotHV, float3 fMulti)
+{
+    // Diffuse
+    float3 albedo_lambda = RGBToSpectrumTable3(lambda, material.albedo);
+
+    float3 diffuseLambda = albedo_lambda * lobes.diffuseShape;
+
+    // Specular
+    float3 specularLambda;
+    float3 specularLambdaMulti;
+
+    if (!lobes.isMetal)
+    {
+        // Dielectric → achromatic Fresnel
+        float F0 = 0.04;
+        float F = FresnelSchlickScalar(dotHV, F0);
+        specularLambda = (lobes.specularSingleShape * F).xxx;
+        specularLambdaMulti = lobes.specularMultiShape * fMulti;
+
+
+    }
+    else
+    {
+        // Metal → spectral F0
+        float3 f0Lambda = RGBToSpectrumTable3(lambda, lobes.F0Rgb);
+        float3 fLambda = FresnelSchlickScalar3(dotHV, f0Lambda);
+        specularLambda = lobes.specularSingleShape * fLambda;
+        specularLambdaMulti = lobes.specularMultiShape * fMulti;
+    }
+
+    return (diffuseLambda + (specularLambda + specularLambdaMulti)) * saturate(dotNL);
 }
 float evaluateBRDFSpectral(MaterialBRDF material, float3 normal, float3 viewDirection, float3 lightDirection, float lambda)
 {
@@ -420,15 +536,15 @@ float evaluateBRDFSpectral(MaterialBRDF material, float3 normal, float3 viewDire
                 float3 H = normalize(viewDirection + lightDirection);
                 float dotHV = saturate(dot(H, viewDirection));
                 float dotNL = saturate(dot(normal, lightDirection));
-                BRDFLobes lobes = Cook_Torrance(normal, viewDirection, lightDirection, material);
+                BRDFLobes lobes = CookTorrance(normal, viewDirection, lightDirection, material);
                 return reconstructSpectral(lobes, material, lambda, dotNL, dotHV, 0);
             }
         case BRDF_FastMSX:{
                 float3 H = normalize(viewDirection + lightDirection);
                 float dotHV = saturate(dot(H, viewDirection));
                 float dotNL = saturate(dot(normal, lightDirection));
-                BRDFLobes lobes = Fast_MSX(normal, viewDirection, lightDirection, material);
-                float f0Lambda = RGBToSpectrumTableSingle(lambda, lobes.F0_rgb);
+                BRDFLobes lobes = FastMSX(normal, viewDirection, lightDirection, material);
+                float f0Lambda = RGBToSpectrumTableSingle(lambda, lobes.F0Rgb);
                 float fLambda = FresnelSchlickScalar(dotHV, f0Lambda);
                 return reconstructSpectral(lobes, material, lambda, dotNL, dotHV, fLambda * fLambda);
             }
@@ -437,7 +553,7 @@ float evaluateBRDFSpectral(MaterialBRDF material, float3 normal, float3 viewDire
                 float dotHV = saturate(dot(H, viewDirection));
                 float dotNL = saturate(dot(normal, lightDirection));
                 BRDFLobes lobes = Heitz(normal, viewDirection, lightDirection, material);
-                float f0Lambda = RGBToSpectrumTableSingle(lambda, lobes.F0_rgb);
+                float f0Lambda = RGBToSpectrumTableSingle(lambda, lobes.F0Rgb);
                 return reconstructSpectral(lobes, material, lambda, dotNL, dotHV, f0Lambda);
             }
         case BRDF_StudentT:{
@@ -445,7 +561,7 @@ float evaluateBRDFSpectral(MaterialBRDF material, float3 normal, float3 viewDire
                 float dotHV = saturate(dot(H, viewDirection));
                 float dotNL = saturate(dot(normal, lightDirection));
                 BRDFLobes lobes = StudentT_BRDF(normal, viewDirection, lightDirection, material);
-                float f0Lambda = RGBToSpectrumTableSingle(lambda, lobes.F0_rgb);
+                float f0Lambda = RGBToSpectrumTableSingle(lambda, lobes.F0Rgb);
                 return reconstructSpectral(lobes, material, lambda, dotNL, dotHV, f0Lambda);
             }
         case BRDF_GGX:
@@ -461,10 +577,73 @@ float evaluateBRDFSpectral(MaterialBRDF material, float3 normal, float3 viewDire
             }
     }
 }
+float3 evaluateBRDFSpectral3(MaterialBRDF material, float3 normal, float3 viewDirection, float3 lightDirection, float3 lambda)
+{
+    switch (material.brdfType)
+    {
+        case BRDF_CookTorr:{
+                float3 H = normalize(viewDirection + lightDirection);
+                float dotHV = saturate(dot(H, viewDirection));
+                float dotNL = saturate(dot(normal, lightDirection));
+                BRDFLobes lobes = CookTorrance(normal, viewDirection, lightDirection, material);
+                return reconstructSpectral3(lobes, material, lambda, dotNL, dotHV, 0);
+            }
+        case BRDF_FastMSX:{
+                float3 H = normalize(viewDirection + lightDirection);
+                float dotHV = saturate(dot(H, viewDirection));
+                float dotNL = saturate(dot(normal, lightDirection));
+                BRDFLobes lobes = FastMSX(normal, viewDirection, lightDirection, material);
+                float3 f0Lambda = RGBToSpectrumTable3(lambda, lobes.F0Rgb);
+                float3 fLambda = FresnelSchlickScalar3(dotHV, f0Lambda);
+                return reconstructSpectral3(lobes, material, lambda, dotNL, dotHV, fLambda * fLambda);
+            }
+        case BRDF_Heitz:{
+                float3 H = normalize(viewDirection + lightDirection);
+                float dotHV = saturate(dot(H, viewDirection));
+                float dotNL = saturate(dot(normal, lightDirection));
+                BRDFLobes lobes = Heitz(normal, viewDirection, lightDirection, material);
+                float3 f0Lambda = RGBToSpectrumTable3(lambda, lobes.F0Rgb);
+                return reconstructSpectral3(lobes, material, lambda, dotNL, dotHV, f0Lambda);
+            }
+        case BRDF_StudentT:{
+                float3 H = normalize(viewDirection + lightDirection);
+                float dotHV = saturate(dot(H, viewDirection));
+                float dotNL = saturate(dot(normal, lightDirection));
+                BRDFLobes lobes = StudentT_BRDF(normal, viewDirection, lightDirection, material);
+                float3 f0Lambda = RGBToSpectrumTable3(lambda, lobes.F0Rgb);
+                return reconstructSpectral3(lobes, material, lambda, dotNL, dotHV, f0Lambda);
+            }
+        case BRDF_GGX:
+        default:
+        {
+                float3 H = normalize(viewDirection + lightDirection);
+                float dotHV = saturate(dot(H, viewDirection));
+                float dotNH = saturate(dot(normal, H));
+                float dotNL = saturate(dot(normal, lightDirection));
+                float dotNV = saturate(dot(normal, viewDirection));
+                BRDFLobes lobes = evaluateBRDF_GGX(material, dotHV, dotNH, dotNL, dotNV);
+                return reconstructSpectral3(lobes, material, lambda, dotNL, dotHV, 0);
+            }
+    }
+
+}
 float evaluateBRDFDiffuseSpecular(MaterialBRDF material, float dotHV, float dotNL, float lambda)
 {
     // Calculate diffuse component
     float diffuse = RGBToSpectrumTableSingle(lambda, material.albedo) * INV_PI;
+    // Add the weight of the diffuse compensation term to prevent excessive brightness compared to specular
+#ifndef DISABLE_SPECULAR_MATERIALS
+    diffuse *= diffuseCompensation(fresnel(material.F0, dotHV), dotHV).r;
+#else
+    diffuse *= diffuseCompensation(fresnel(0.04f.xxx, dotHV), dotHV).r;
+#endif
+    diffuse *= saturate(dotNL);
+    return diffuse;
+}
+float3 evaluateBRDFDiffuseSpecular3(MaterialBRDF material, float dotHV, float dotNL, float3 lambda)
+{
+    // Calculate diffuse component
+    float3 diffuse = RGBToSpectrumTable3(lambda, material.albedo) * INV_PI;
     // Add the weight of the diffuse compensation term to prevent excessive brightness compared to specular
 #ifndef DISABLE_SPECULAR_MATERIALS
     diffuse *= diffuseCompensation(fresnel(material.F0, dotHV), dotHV).r;
@@ -517,6 +696,48 @@ float sampleBRDFPDFAndEvaluteSpectral(MaterialBRDF material, float3 normal, floa
 #endif
     return samplePDF;
 }
+float sampleBRDFPDFAndEvaluteSpectral(MaterialBRDF material, float3 normal, float3 viewDirection,
+    float3 lightDirection, float3 lambda, out float3 reflectanceLambda)
+{
+#ifndef DISABLE_SPECULAR_MATERIALS
+    // Transform the view+light direction into the surfaces tangent coordinate space (oriented so that z axis is aligned to normal)
+    Quaternion localRotation = QuaternionRotationZ(normal);
+    float3 localView = localRotation.transform(viewDirection);
+    float3 newLight = localRotation.transform(lightDirection);
+
+    // Evaluate BRDF for input light direction
+    float dotNL = clamp(newLight.z, -1.0f, 1.0f);
+    // Calculate half vector
+    float3 halfVector = normalize(localView + newLight);
+    // Calculate shading angles
+    float dotHV = saturate(dot(halfVector, localView));
+    float dotNH = clamp(halfVector.z, -1.0f, 1.0f);
+    float dotNV = clamp(localView.z, -1.0f, 1.0f);
+
+    reflectanceLambda = evaluateBRDFSpectral3(material, float3(0, 0, 1), localView, newLight, lambda);
+
+    // Must use specular direction for H.V to match sampling functions
+    float3 specularLightDirection = estimateSpecularPeak(material, float3(0.0f, 0.0f, 1.0f), localView);
+    float3 specularHalfVector = normalize(localView + specularLightDirection);
+    float specularDotHV = saturate(dot(specularHalfVector, localView));
+
+    // Calculate combined PDF for current sample
+    // Note: has some duplicated calculations in evaluateBRDF_GGX and sampleBRDFPDF
+    float samplePDF = sampleBRDFPDF(material, dotNH, dotNL, specularDotHV, dotNV, localView, halfVector);
+#else
+    // Calculate shading angles
+    float dotNL = clamp(dot(normal, lightDirection), -1.0f, 1.0f);
+    // Calculate half vector
+    float3 halfVector = normalize(viewDirection + lightDirection);
+    float dotHV = saturate(dot(halfVector, viewDirection));
+    reflectanceLambda = evaluateBRDFDiffuseSpecular3(material, dotHV, dotNL, lambda);
+    
+
+    // Calculate diffuse PDF for current sample
+    float samplePDF = sampleLambertPDF(dotNL);
+#endif
+    return samplePDF;
+}
 
 template<typename RNG>
 float sampleBRDFAndEvaluateSpectral(MaterialBRDF material, inout RNG randomNG, float3 normal, float3 viewDirection, 
@@ -538,7 +759,7 @@ float lambda, out float3 lightDirection, out float pdf)
     if (randomNG.rand() < probabilityBRDF)
     {
         // Sample specular BRDF component
-        newLight = sampleSpecularDirection(material, localView, samples);
+        newLight = sampleSpecularDirection(material, localView, samples, randomNG);
     }
     else
     {
@@ -578,7 +799,66 @@ float lambda, out float3 lightDirection, out float pdf)
     lightDirection = normalize(localRotation.inverse().transform(newLight));
     return f_lambda;
 }
+template<typename RNG>
+float3 sampleBRDFAndEvaluateSpectral(MaterialBRDF material, inout RNG randomNG, float3 normal, float3 viewDirection,
+float3 lambda, out float3 lightDirection, out float pdf)
+{
+    // Transform the view direction into the surfaces tangent coordinate space (oriented so that z axis is aligned to normal)
+    Quaternion localRotation = QuaternionRotationZ(normal);
+    float3 localView = localRotation.transform(viewDirection);
 
+    // Check which BRDF component to sample
+    float3 newLight;
+    float2 samples = randomNG.rand2();
+#ifndef DISABLE_SPECULAR_MATERIALS
+    float3 specularLightDirection = estimateSpecularPeak(material, float3(0.0f, 0.0f, 1.0f), localView);
+    float3 specularHalfVector = normalize(localView + specularLightDirection);
+    // Calculate shading angles
+    float specularDotHV = saturate(dot(specularHalfVector, localView));
+    float probabilityBRDF = calculateBRDFProbability(material.F0, specularDotHV, material.albedo);
+    if (randomNG.rand() < probabilityBRDF)
+    {
+        // Sample specular BRDF component
+        newLight = sampleSpecularDirection(material, localView, samples, randomNG);
+    }
+    else
+    {
+        // Sample diffuse BRDF component
+        newLight = sampleLambert(samples);
+    }
+#else
+    // Sample diffuse BRDF component
+    newLight = sampleLambert(samples);
+#endif
+
+    // Evaluate BRDF for new light direction
+    float dotNL = clamp(newLight.z, -1.0f, 1.0f);
+    float3 N = float3(0, 0, 1);
+    // Calculate half vector
+    float3 halfVector = normalize(localView + newLight);
+    // Calculate shading angles
+    float dotHV = saturate(dot(halfVector, localView));
+#ifndef DISABLE_SPECULAR_MATERIALS
+    float dotNH = clamp(halfVector.z, -1.0f, 1.0f);
+    float dotNV = clamp(localView.z, -1.0f, 1.0f);
+    float3 f_lambda = evaluateBRDFSpectral3(material, N, localView, newLight, lambda);
+    
+#else
+    float3 f_lambda= evaluateBRDFDiffuseSpecular3(material, dotHV, dotNL, lambda);
+#endif
+    // Calculate combined PDF for current sample
+    // Note: has some duplicated calculations in evaluateBRDF_GGX and sampleBRDFPDF
+#ifndef DISABLE_SPECULAR_MATERIALS
+    pdf = sampleBRDFPDF2(material, dotNH, dotNL, dotNV, probabilityBRDF, localView, halfVector);
+#else
+    pdf = sampleLambertPDF(dotNL);
+#endif
+
+    
+    // Transform the new direction back into world space
+    lightDirection = normalize(localRotation.inverse().transform(newLight));
+    return f_lambda;
+}
 
 float evaluateAreaLightSpectral(LightArea light, float2 barycentric, float lambda)
 {
@@ -606,6 +886,31 @@ float evaluateAreaLightSpectral(LightArea light, float2 barycentric, float lambd
 #endif
 }
 
+float3 evaluateAreaLightSpectral3(LightArea light, float2 barycentric, float3 lambda)
+{
+#ifndef DISABLE_AREA_LIGHTS
+    // Load RGB emissivity
+    float3 emissivity_rgb = light.emissivity.xyz;
+
+    // Optional emissivity texture
+    uint emissivityTex = asuint(light.emissivity.w);
+    if (emissivityTex != uint(-1))
+    {
+        float2 uv = interpolate(light.uv0, light.uv1, light.uv2, barycentric);
+        float4 tex = g_TextureMaps[NonUniformResourceIndex(emissivityTex)]
+                        .SampleLevel(g_TextureSampler, uv, 0.0f);
+
+        emissivity_rgb *= tex.xyz;
+        emissivity_rgb *= tex.w; // alpha modulation
+    }
+    float3 emissivity_lambda = RGBToSpectrumTable3(lambda, emissivity_rgb);
+
+    return emissivity_lambda;
+#else
+    return 0.0f.xxx;
+#endif
+}         
+
 float evaluateEnvironmentLightSpectral(LightEnvironment light, float3 direction, float lambda )
 {
 #ifndef DISABLE_ENVIRONMENT_LIGHTS
@@ -619,7 +924,19 @@ float evaluateEnvironmentLightSpectral(LightEnvironment light, float3 direction,
     return 0.0f;
 #endif
 }
+float3 evaluateEnvironmentLightSpectral3(LightEnvironment light, float3 direction, float3 lambda)
+{
+#ifndef DISABLE_ENVIRONMENT_LIGHTS
+    // Sample RGB environment map
+    float3 env_rgb = g_EnvironmentBuffer.SampleLevel(g_TextureSampler, direction, 0.0f).xyz;
 
+    float3 env_lambda = RGBToSpectrumTable3(lambda, env_rgb);
+
+    return env_lambda;
+#else
+    return 0.0f.xxx;
+#endif
+}
 
 #endif // SPECTRAL_HLSL
 

@@ -35,6 +35,8 @@ struct MaterialEvaluated
 {
     float3 albedo_linear;
     float3 albedo_srgb_nl;
+    float ior;
+    float transmission;
 #ifndef DISABLE_SPECULAR_MATERIALS
     float metallicity;
     float roughness;
@@ -84,6 +86,16 @@ MaterialEvaluated MakeMaterialEvaluated(Material material, float2 uv)
         albedo_srgb_nl = linear_to_srgb(base);
     }
 
+    float ior = material.ior_transmission.x;
+
+    float transmission = material.ior_transmission.y;
+    uint transmissionTex = asuint(material.ior_transmission.z);
+    if (transmissionTex != uint(-1))
+    {
+        transmission *= g_TextureMaps[NonUniformResourceIndex(transmissionTex)]
+                        .SampleLevel(g_TextureSampler, uv, 0.0f).x;
+    }
+
 #ifndef DISABLE_SPECULAR_MATERIALS
     float metallicity = material.metallicity_roughness.x;
     uint metallicityTex = asuint(material.metallicity_roughness.y);
@@ -104,6 +116,8 @@ MaterialEvaluated MakeMaterialEvaluated(Material material, float2 uv)
     {
         albedo_linear,
         albedo_srgb_nl,
+        ior,
+        transmission,
 #ifndef DISABLE_SPECULAR_MATERIALS
         metallicity,
         roughness
@@ -144,6 +158,15 @@ MaterialEvaluated MakeMaterialEvaluated(Material material, float2 uv, float2 gra
         albedo_srgb_nl = linear_to_srgb(base);
     }
 
+    float ior = material.ior_transmission.x;
+
+    float transmission = material.ior_transmission.y;
+    uint transmissionTex = asuint(material.ior_transmission.z);
+    if (transmissionTex != uint(-1))
+    {
+        transmission *= g_TextureMaps[NonUniformResourceIndex(transmissionTex)]
+                        .SampleLevel(g_TextureSampler, uv, 0.0f).x;
+    }
 #ifndef DISABLE_SPECULAR_MATERIALS
     float metallicity = material.metallicity_roughness.x;
     uint metallicityTex = asuint(material.metallicity_roughness.y);
@@ -164,6 +187,8 @@ MaterialEvaluated MakeMaterialEvaluated(Material material, float2 uv, float2 gra
     {
         albedo_linear,
         albedo_srgb_nl,
+        ior,
+        transmission,
 #ifndef DISABLE_SPECULAR_MATERIALS
         metallicity,
         roughness
@@ -189,6 +214,8 @@ struct MaterialBRDF
     float metallicity;
     float gamma;
     uint mpmlIndex;
+    float ior;
+    float transmission;
 #ifndef DISABLE_SPECULAR_MATERIALS
     float roughnessAlpha;
     float3 F0;
@@ -242,7 +269,9 @@ MaterialBRDF MakeMaterialBRDF(MaterialEvaluated material, uint brdfType)
     float3 albedo_srgb_nl = material.albedo_srgb_nl;
 #ifndef DISABLE_SPECULAR_MATERIALS
     // Calculate albedo/F0 using metallicity
-    float3 F0 = lerp(0.04f.xxx, albedo, material.metallicity);
+    float eta = material.ior;
+    float dielectricF0 = ((eta - 1.0f) / (eta + 1.0f));
+    float3 F0 = lerp(dielectricF0.xxx, albedo, material.metallicity);
     albedo *= (1.0f - material.metallicity);
     float roughnessAlpha = ClampAlphaRoughness(ConvertPerceptualRoughnessToAlpha(material.roughness));
     float roughnessAlphaSqr = ClampAlphaRoughness(roughnessAlpha * roughnessAlpha);
@@ -255,6 +284,8 @@ MaterialBRDF MakeMaterialBRDF(MaterialEvaluated material, uint brdfType)
         material.metallicity,
      3,
      0,
+        material.ior,
+        material.transmission,
 #ifndef DISABLE_SPECULAR_MATERIALS
         roughnessAlpha,
         F0,
@@ -419,6 +450,8 @@ MaterialBSDF MakeMaterialBSDF(Material material, float2 uv, BRDFType brdfType)
         materialBRDF.metallicity,
         materialBRDF.gamma,
         materialBRDF.mpmlIndex,
+        materialBRDF.ior,
+        materialBRDF.transmission,
 #ifndef DISABLE_SPECULAR_MATERIALS
         materialBRDF.roughnessAlpha,
         materialBRDF.F0,
@@ -460,6 +493,8 @@ MaterialBSDF MakeMaterialBSDF(Material material, float2 uv, float2 gradX, float2
         materialBRDF.metallicity,
         materialBRDF.gamma,
         materialBRDF.mpmlIndex,
+        materialBRDF.ior,
+        materialBRDF.transmission,
 #ifndef DISABLE_SPECULAR_MATERIALS
         materialBRDF.roughnessAlpha,
         materialBRDF.F0,
@@ -485,6 +520,8 @@ MaterialBRDF MakeMaterialBRDF(MaterialBSDF material)
         material.metallicity,
         material.gamma,
         material.mpmlIndex,
+        material.ior,
+        material.transmission,
 #ifndef DISABLE_SPECULAR_MATERIALS
         material.roughnessAlpha,
         material.F0,

@@ -27,10 +27,10 @@ THE SOFTWARE.
 #include "math/math_constants.hlsl"
 struct BRDFLobes
 {
-    float diffuse_scalar; // Lambertian shape only, no color
-    float specular_shape; // D*G / (4*N·L*N·V), wavelength-independent
-    float spec_multi_shape;
-    float3 F0_rgb; // RGB F0 for metals OR scalar F0.xxx for dielectrics
+    float diffuseShape; // Lambertian shape only, no color
+    float specularSingleShape; // D*G / (4*N·L*N·V), wavelength-independent
+    float specularMultiShape;
+    float3 F0Rgb; // RGB F0 for metals OR scalar F0.xxx for dielectrics
     bool isMetal;
 };
 #include "render_techniques/multi_scatter_test/brdf_models.hlsl"
@@ -185,20 +185,20 @@ BRDFLobes evaluateBRDF_GGX(MaterialBRDF material, float dotHV, float dotNH, floa
     // Calculate diffuse component
     float3 F = fresnel(material.F0, dotHV);
     float3 diffCompRGB = diffuseCompensation(F, dotHV);
-    r.diffuse_scalar = INV_PI * diffCompRGB.r;
+    r.diffuseShape = INV_PI * diffCompRGB.r;
 
 #ifndef DISABLE_SPECULAR_MATERIALS
     // Calculate specular component
     float3 f;
     float3 spec_rgb = evaluateGGX(material.roughnessAlphaSqr, dotNH, dotNL, dotNV);
-    r.specular_shape = (spec_rgb.r + spec_rgb.g + spec_rgb.b) * (1.0 / 3.0);
+    r.specularSingleShape = (spec_rgb.r + spec_rgb.g + spec_rgb.b) * (1.0 / 3.0);
     
-    r.spec_multi_shape = 0.0f;
-    r.F0_rgb = material.F0;
+    r.specularMultiShape = 0.0f;
+    r.F0Rgb = material.F0;
 #else
-    r.specular_shape = 0.0;
-    r.F0_rgb = float3(0,0,0);
-    r.spec_multi_shape = 0.0f;
+    r.specularSingleShape = 0.0;
+    r.F0Rgb = float3(0,0,0);
+    r.specularMultiShape = 0.0f;
 #endif
     return r;
 }
@@ -241,10 +241,10 @@ float3 evaluateBRDF_GGX(MaterialBRDF material, float3 normal, float3 viewDirecti
 }
 float3 reconstructRGB(BRDFLobes lobes, MaterialBRDF material, float dotNL, float dotHV, float3 fMulti)
 {
-    float3 diffuse_rgb = material.albedo * lobes.diffuse_scalar;
-    float3 F = Fresnel_Schlick(dotHV, lobes.F0_rgb);
-    float3 spec_single = F * lobes.specular_shape;
-    float3 spec_multi = lobes.spec_multi_shape * fMulti;
+    float3 diffuse_rgb = material.albedo * lobes.diffuseShape;
+    float3 F = FresnelSchlick(dotHV, lobes.F0Rgb);
+    float3 spec_single = F * lobes.specularSingleShape;
+    float3 spec_multi = lobes.specularMultiShape * fMulti;
 
     return (diffuse_rgb + spec_single + spec_multi) * saturate(dotNL);
 }
@@ -256,15 +256,15 @@ float3 evaluateBRDF(MaterialBRDF material, float3 normal, float3 viewDirection, 
                 float3 H = normalize(viewDirection + lightDirection);
                 float dotHV = saturate(dot(H, viewDirection));
                 float dotNL = saturate(dot(normal, lightDirection));
-                BRDFLobes lobes = Cook_Torrance(normal, viewDirection, lightDirection, material);
+                BRDFLobes lobes = CookTorrance(normal, viewDirection, lightDirection, material);
                 return reconstructRGB(lobes, material, dotNL, dotHV, 0.0f.xxx);
             }
         case BRDF_FastMSX:{
                 float3 H = normalize(viewDirection + lightDirection);
                 float dotHV = saturate(dot(H, viewDirection));
                 float dotNL = saturate(dot(normal, lightDirection));
-                BRDFLobes lobes = Fast_MSX(normal, viewDirection, lightDirection, material);
-                float3 F = Fresnel_Schlick(dotHV, lobes.F0_rgb);
+                BRDFLobes lobes = FastMSX(normal, viewDirection, lightDirection, material);
+                float3 F = FresnelSchlick(dotHV, lobes.F0Rgb);
                 return reconstructRGB(lobes, material, dotNL, dotHV, F * F);
             }
         case BRDF_Heitz:{

@@ -196,13 +196,20 @@ float3 sampleStudentT(float alpha, float3 localView, float2 samples)
     // Student-T has no VNDF sampler, so we fall back to GGX VNDF sampling.
     return sampleGGX(alpha, localView, samples);
 }
-float3 sampleSpecularDirection(MaterialBRDF material, float3 localView, float2 samples)
+template<typename RNG>
+float3 sampleSpecularDirection(MaterialBRDF material, float3 localView, float2 samples, inout RNG randomNG)
 {
     switch (material.brdfType)
     {
         case BRDF_GGX:
         case BRDF_CookTorr:
         case BRDF_Heitz:
+        {
+                float scatteringOrder;
+                float alphaX = material.roughnessAlpha;
+                float alphaY = alphaX;
+                return microsurfaceSample(material, localView, scatteringOrder, true, alphaX, alphaY, true,randomNG);
+            }                                                                               
         case BRDF_FastMSX:
             return sampleGGX(material.roughnessAlpha, localView, samples);
 
@@ -626,7 +633,7 @@ float3 sampleBRDFAndEvaluateType(MaterialBRDF material, inout RNG randomNG, floa
     if (randomNG.rand() < probabilityBRDF)
     {
         // Sample specular BRDF component
-        newLight = sampleSpecularDirection(material, localView, samples);
+        newLight = sampleSpecularDirection(material, localView, samples, randomNG);
         specularSampled = true;
     }
     else
@@ -718,7 +725,7 @@ float3 sampleBRDFType(MaterialBRDF material, inout RNG randomNG, float3 normal, 
     if (specularSampled)
     {
         // Sample specular BRDF component
-        newLight = sampleSpecularDirection(material, localView, samples);
+        newLight = sampleSpecularDirection(material, localView, samples, randomNG);
     }
     else
     {
@@ -934,7 +941,7 @@ float3 sampleBRDFAndEvaluateSpecular(MaterialBRDF material, inout RNG randomNG, 
 
     // Sample specular BRDF component
     float2 samples = randomNG.rand2();
-    float3 newLight = sampleSpecularDirection(material, localView, samples);
+    float3 newLight = sampleSpecularDirection(material, localView, samples, randomNG);
 
     // Evaluate BRDF for new light direction
     float dotNL = clamp(newLight.z, -1.0f, 1.0f);
@@ -974,7 +981,7 @@ float3 sampleBRDFSpecular(MaterialBRDF material, inout RNG randomNG, float3 norm
 
     // Sample specular BRDF component
     float2 samples = randomNG.rand2();
-    float3 newLight = sampleSpecularDirection(material, localView, samples);
+    float3 newLight = sampleSpecularDirection(material, localView, samples, randomNG);
 
     // Calculate half vector
     float3 halfVector = normalize(localView + newLight);

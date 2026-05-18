@@ -48,9 +48,9 @@ THE SOFTWARE.
  struct CustomPayLoad
 {
      float3 xyz;          // accumulated xyz
-     float lambda;       // 3 sampled wavelengths
+     float3 lambda;       // 3 sampled wavelengths
      //float3 pdf;          // PDF for each wavelengt
-     float L_lambda;  // accumulated spectral radiance
+     float3 L_lambda;  // accumulated spectral radiance
 };
 
 #ifdef USE_CUSTOM_HIT_PAYLOAD
@@ -120,7 +120,7 @@ void shadePathMissCustom(RayInfo ray, uint currentBounce, inout Random randomNG,
     if (hasEnvironmentLight())
     {
         LightEnvironment light = getEnvironmentLight();
-        float envLambda = evaluateEnvironmentLightSpectral(light, ray.direction, radiance.lambda);
+        float3 envLambda = evaluateEnvironmentLightSpectral3(light, ray.direction, radiance.lambda);
         //float3 pdf = max(radiance.pdf, 1e-6.xxx);
 
         #   if !defined(DISABLE_NEE)
@@ -132,13 +132,13 @@ void shadePathMissCustom(RayInfo ray, uint currentBounce, inout Random randomNG,
             if (lightPDF != 0.0f)
             {
                 float weight = heuristicMIS(samplePDF, lightPDF);
-                radiance.L_lambda += (throughput.x * envLambda * weight);
+                radiance.L_lambda += (throughput * envLambda * weight);
             }
         }
         else
 #   endif // !DISABLE_NON_NEE
         {
-            radiance.L_lambda += (throughput.x * envLambda);
+            radiance.L_lambda += (throughput * envLambda);
         }
 
         
@@ -211,7 +211,7 @@ void shadePathHitCustom(RayInfo ray, HitInfo hitData, IntersectData iData, inout
             areaEmissivity, iData.uv, iData.uv, iData.uv);
 
 
-        float area_lambda = evaluateAreaLightSpectral(emissiveLight, 0.0f.xx, radiance.lambda);
+        float3 area_lambda = evaluateAreaLightSpectral3(emissiveLight, 0.0f.xx, radiance.lambda);
         #   if !defined(DISABLE_NEE)
         if (currentBounce != 0)
         {
@@ -221,13 +221,13 @@ void shadePathHitCustom(RayInfo ray, HitInfo hitData, IntersectData iData, inout
             if (lightPDF != 0.0f)
             {
                 float weight = heuristicMIS(samplePDF, lightPDF);
-                radiance.L_lambda += (throughput.x * area_lambda * weight);
+                radiance.L_lambda += (throughput * area_lambda * weight);
             }
         }
         else
 #   endif // !DISABLE_NON_NEE
         {
-            radiance.L_lambda += (throughput.x * area_lambda);
+            radiance.L_lambda += (throughput * area_lambda);
         }
        
     }
@@ -292,12 +292,12 @@ template<typename RadianceT>
 void shadeLightHitCustom(RayInfo ray, MaterialBRDF material, uint currentBounce, float3 normal, float3 viewDirection, float3 throughput,
     float lightPDF, float3 radianceLi, Light selectedLight, inout RadianceT radiance)
 {
-    float lambda   = radiance.lambda;
-    float lambdaLi = RGBToSpectrumTableSingle(lambda, radianceLi);
+    float3 lambda   = radiance.lambda;
+    float3 lambdaLi = RGBToSpectrumTable3(lambda, radianceLi);
 #if defined(DISABLE_NON_NEE) || (defined(DISABLE_AREA_LIGHTS) && defined(DISABLE_ENVIRONMENT_LIGHTS))
 
-    float reflectanceLambda = evaluateBRDFSpectral(material, normal, viewDirection, ray.direction, lambda);
-    float contribution_lambda = throughput.x * reflectanceLambda * lambdaLi * (1.0f / lightPDF);
+    float3 reflectanceLambda = evaluateBRDFSpectral3(material, normal, viewDirection, ray.direction, lambda);
+    float3 contribution_lambda = throughput * reflectanceLambda * lambdaLi * (1.0f / lightPDF);
 
     
     radiance.L_lambda += contribution_lambda ;
@@ -306,14 +306,14 @@ void shadeLightHitCustom(RayInfo ray, MaterialBRDF material, uint currentBounce,
     
     
 
-    float reflectanceLambda;
+    float3 reflectanceLambda;
     float samplePDF = sampleBRDFPDFAndEvaluteSpectral(material, normal, viewDirection, ray.direction, lambda, reflectanceLambda);
     
     if (samplePDF != 0.0f)
     {
         bool deltaLight = isDeltaLight(selectedLight);
         float weight = (!deltaLight) ? heuristicMIS(lightPDF, samplePDF) : 1.0f;
-        float contribution_lambda = throughput.x * reflectanceLambda * lambdaLi * (weight / lightPDF);
+        float3 contribution_lambda = throughput.x * reflectanceLambda * lambdaLi * (weight / lightPDF);
         radiance.L_lambda += contribution_lambda;
         
     }
@@ -472,13 +472,13 @@ bool pathNextCustom(MaterialBRDF materialBRDF, inout StratifiedSampler randomStr
 {
     samplePDF = 0.0f;
     float3 rayDirection;  //sampleBRDFAndEvaluate(materialBRDF, randomStratified, normal, viewDirection, sampleReflectance, samplePDF);
-    float f_lambda = sampleBRDFAndEvaluateSpectral(materialBRDF, randomStratified, normal, viewDirection, radiance.lambda, rayDirection, samplePDF);
+    float3 f_lambda = sampleBRDFAndEvaluateSpectral(materialBRDF, randomStratified, normal, viewDirection, radiance.lambda, rayDirection, samplePDF);
 
 
     if (dot(geometryNormal, rayDirection) <= 0.0f || samplePDF == 0.0f)
         return false;
 
-    throughput.x *= (f_lambda / samplePDF);
+    throughput *= (f_lambda / samplePDF);
     ray = MakeRayInfoClosest(position, geometryNormal, rayDirection);
     return true;
 }
@@ -638,10 +638,10 @@ void tracePath(RayInfo ray, inout StratifiedSampler randomStratified, inout Rand
 #if USE_INLINE_RT
     float samplePDF = 1.0f; // The PDF of the last sampled BRDF
 #   if USE_CUSTOM_HIT_PAYLOAD
-        float pdf;
+        float3 pdf;
         radiance.xyz        = 0.0.xxx;
-        sampleHeroWavelength(randomNG, radiance.lambda, pdf);
-        radiance.L_lambda   = 0.0;
+        sampleHeroWavelengths3(randomNG, radiance.lambda, pdf);
+        radiance.L_lambda   = 0.0.xxx;
 #   endif
 #else
     PathData pathData;
@@ -656,11 +656,10 @@ void tracePath(RayInfo ray, inout StratifiedSampler randomStratified, inout Rand
     pathData.throughput = throughput;
 #if USE_CUSTOM_HIT_PAYLOAD
     // spectral payload
-    float pdf;
+    float3 pdf;
     pathData.radiance.xyz = 0.0.xxx;
-    pathData.radiance.lambda = 1.0;
-    sampleHeroWavelength(pathData.randomNG, pathData.radiance.lambda, pdf);
-    pathData.radiance.L_lambda = 0.0;
+    sampleHeroWavelengths3(pathData.randomNG, pathData.radiance.lambda, pdf);
+    pathData.radiance.L_lambda = 0.0.xxx;
 #else
     pathData.radiance = radiance;
     
@@ -708,11 +707,11 @@ void tracePath(RayInfo ray, inout StratifiedSampler randomStratified, inout Rand
     
 #if USE_INLINE_RT
 #   if USE_CUSTOM_HIT_PAYLOAD
-    radiance.xyz += HeroWavelengthContribution(radiance.lambda, radiance.L_lambda, pdf);
+    radiance.xyz += HeroWavelengthContribution3(radiance.lambda, radiance.L_lambda, pdf);
 #endif
 #else
 #   if USE_CUSTOM_HIT_PAYLOAD
-    pathData.radiance.xyz += HeroWavelengthContribution(pathData.radiance.lambda, pathData.radiance.L_lambda, pdf);
+    pathData.radiance.xyz += HeroWavelengthContribution3(pathData.radiance.lambda, pathData.radiance.L_lambda, pdf);
 #endif
     radiance = pathData.radiance;
 #endif

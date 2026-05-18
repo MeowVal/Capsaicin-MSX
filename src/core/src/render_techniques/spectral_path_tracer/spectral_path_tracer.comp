@@ -74,7 +74,11 @@ SamplerState g_TextureSampler; // Should be a linear sampler
 #include "spectral.hlsl"
 
 
-
+float3 boostSaturation(float3 rgb, float strength)
+{
+    float grey = dot(rgb, float3(0.299, 0.587, 0.114));
+    return lerp(grey.xxx, rgb, strength);
+}
 /**
  * Calculate illumination information for a specific pixel
  * @note This writes a single sample per pixel directly to the output buffer
@@ -128,7 +132,7 @@ void pathTracer(in uint2 pixel, in uint2 dimensions)
     }
     const float deltaLambda = 1.0f;
     const float N = 106.856895f;
-    XYZ_accum *= (deltaLambda / N);
+    //XYZ_accum *= (deltaLambda / N);
     float3 radiance = reconstructBT709(XYZ_accum);
     // Check for incorrect calculations
     if (any(isnan(radiance)) || any(isinf(radiance)) || any(radiance < 0.0f))

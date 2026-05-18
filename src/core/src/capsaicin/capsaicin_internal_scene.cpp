@@ -1604,7 +1604,8 @@ void CapsaicinInternal::updateSceneMaterials() noexcept
                         glm::uintBitsToFloat(
                             materials[i].alpha_mode == GfxMaterialAlphaMode_Blend && !noAlpha  ? 2
                             : materials[i].alpha_mode == GfxMaterialAlphaMode_Mask && !noAlpha ? 1
-                                                                                               : 0))};
+                                                                                               : 0)),
+                    .ior_transmission = float4(materials[i].ior, materials[i].transmission, glm::uintBitsToFloat(materials[i].transmission_map), 0.0f)};
 
                 uint32_t const material_index = gfxSceneGetObjectHandle<GfxMaterial>(scene_, i);
 
