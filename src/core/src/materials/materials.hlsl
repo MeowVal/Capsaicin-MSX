@@ -201,8 +201,9 @@ enum BRDFType : uint
     BRDF_GGX      = 0,
     BRDF_CookTorr = 1,
     BRDF_FastMSX  = 2,
-    BRDF_Heitz    = 3,
-    BRDF_StudentT = 4,
+    BRDF_Heitz_Beckmann = 3,
+    BRDF_Heitz_StudentT = 4,
+    BRDF_Heitz_GGX = 5,
 };
 
 /** Material data required for current BRDF type. */
@@ -270,7 +271,8 @@ MaterialBRDF MakeMaterialBRDF(MaterialEvaluated material, uint brdfType)
 #ifndef DISABLE_SPECULAR_MATERIALS
     // Calculate albedo/F0 using metallicity
     float eta = material.ior;
-    float dielectricF0 = ((eta - 1.0f) / (eta + 1.0f));
+    float r = (eta - 1.0f) / (eta + 1.0f);
+    float dielectricF0 = r * r;
     float3 F0 = lerp(dielectricF0.xxx, albedo, material.metallicity);
     albedo *= (1.0f - material.metallicity);
     float roughnessAlpha = ClampAlphaRoughness(ConvertPerceptualRoughnessToAlpha(material.roughness));

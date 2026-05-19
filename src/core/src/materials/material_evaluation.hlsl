@@ -241,13 +241,21 @@ float3 evaluateBRDF_GGX(MaterialBRDF material, float3 normal, float3 viewDirecti
 }
 float3 reconstructRGB(BRDFLobes lobes, MaterialBRDF material, float dotNL, float dotHV, float3 fMulti)
 {
-    float3 diffuse_rgb = material.albedo * lobes.diffuseShape;
+    float3 diffuseRgb = material.albedo * lobes.diffuseShape;
     float3 F = FresnelSchlick(dotHV, lobes.F0Rgb);
-    float3 spec_single = F * lobes.specularSingleShape;
-    float3 spec_multi = lobes.specularMultiShape * fMulti;
+    float3 specSingle = F * lobes.specularSingleShape;
+    float3 specMulti = lobes.specularMultiShape * fMulti;
 
-    return (diffuse_rgb + spec_single + spec_multi) * saturate(dotNL);
+    return (diffuseRgb + specSingle + specMulti) * saturate(dotNL);
 }
+float3 reconstructRGB_Heitz(BRDFLobes lobes, MaterialBRDF material, float dotNL)
+{
+    float3 diffuseRgb = material.albedo * lobes.diffuseShape;
+    float3 specularRgb = lobes.specularSingleShape * material.F0; // already full BSDF
+
+    return (diffuseRgb + specularRgb) * saturate(dotNL);
+}
+
 float3 evaluateBRDF(MaterialBRDF material, float3 normal, float3 viewDirection, float3 lightDirection)
 {
     switch (material.brdfType)
@@ -267,23 +275,15 @@ float3 evaluateBRDF(MaterialBRDF material, float3 normal, float3 viewDirection, 
                 float3 F = FresnelSchlick(dotHV, lobes.F0Rgb);
                 return reconstructRGB(lobes, material, dotNL, dotHV, F * F);
             }
-        case BRDF_Heitz:{
-                float3 H = normalize(viewDirection + lightDirection);
-                float dotHV = saturate(dot(H, viewDirection));
+        case BRDF_Heitz_GGX:
+        case BRDF_Heitz_StudentT:
+        case BRDF_Heitz_Beckmann:{
                 float dotNL = saturate(dot(normal, lightDirection));
                 BRDFLobes lobes = Heitz(normal, viewDirection, lightDirection, material);
-                return reconstructRGB(lobes, material, dotNL, dotHV, material.F0);
+                return reconstructRGB_Heitz(lobes, material, dotNL);
             }
-        case BRDF_StudentT:{
-                float3 H = normalize(viewDirection + lightDirection);
-                float dotHV = saturate(dot(H, viewDirection));
-                float dotNH = saturate(dot(normal, H));
-                float dotNL = saturate(dot(normal, lightDirection));
-                BRDFLobes lobes = StudentT_BRDF(normal, viewDirection, lightDirection, material);
-                return reconstructRGB(lobes, material, dotNL, dotHV, material.F0);
-            }
-    case BRDF_GGX:
-    default:
+        case BRDF_GGX:
+        default:
         {
             float3 H = normalize(viewDirection + lightDirection);
             float dotHV = saturate(dot(H, viewDirection));

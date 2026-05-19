@@ -502,7 +502,6 @@ float3 reconstructSpectral3(BRDFLobes lobes,
     float3 albedo_lambda = RGBToSpectrumTable3(lambda, material.albedo);
 
     float3 diffuseLambda = albedo_lambda * lobes.diffuseShape;
-
     // Specular
     float3 specularLambda;
     float3 specularLambdaMulti;
@@ -528,6 +527,21 @@ float3 reconstructSpectral3(BRDFLobes lobes,
 
     return (diffuseLambda + (specularLambda + specularLambdaMulti)) * saturate(dotNL);
 }
+float3 reconstructSpectral3_Heitz(
+    BRDFLobes lobes,
+    MaterialBRDF material,
+    float3 lambda,
+    float dotNL)
+{
+    // Spectral albedo (Lambert diffuse)
+    float3 albedo_lambda = RGBToSpectrumTable3(lambda, material.albedo);
+    float3 diffuse = albedo_lambda * lobes.diffuseShape;
+
+    float3 f0Lambda = RGBToSpectrumTable3(lambda, lobes.F0Rgb);
+    float3 specular = lobes.specularSingleShape * f0Lambda;
+
+    return (diffuse + specular) * saturate(dotNL);
+}
 float evaluateBRDFSpectral(MaterialBRDF material, float3 normal, float3 viewDirection, float3 lightDirection, float lambda)
 {
     switch (material.brdfType)
@@ -548,7 +562,7 @@ float evaluateBRDFSpectral(MaterialBRDF material, float3 normal, float3 viewDire
                 float fLambda = FresnelSchlickScalar(dotHV, f0Lambda);
                 return reconstructSpectral(lobes, material, lambda, dotNL, dotHV, fLambda * fLambda);
             }
-        case BRDF_Heitz:{
+        case BRDF_Heitz_Beckmann:{
                 float3 H = normalize(viewDirection + lightDirection);
                 float dotHV = saturate(dot(H, viewDirection));
                 float dotNL = saturate(dot(normal, lightDirection));
@@ -556,7 +570,7 @@ float evaluateBRDFSpectral(MaterialBRDF material, float3 normal, float3 viewDire
                 float f0Lambda = RGBToSpectrumTableSingle(lambda, lobes.F0Rgb);
                 return reconstructSpectral(lobes, material, lambda, dotNL, dotHV, f0Lambda);
             }
-        case BRDF_StudentT:{
+        case BRDF_Heitz_StudentT:{
                 float3 H = normalize(viewDirection + lightDirection);
                 float dotHV = saturate(dot(H, viewDirection));
                 float dotNL = saturate(dot(normal, lightDirection));
@@ -597,21 +611,13 @@ float3 evaluateBRDFSpectral3(MaterialBRDF material, float3 normal, float3 viewDi
                 float3 fLambda = FresnelSchlickScalar3(dotHV, f0Lambda);
                 return reconstructSpectral3(lobes, material, lambda, dotNL, dotHV, fLambda * fLambda);
             }
-        case BRDF_Heitz:{
-                float3 H = normalize(viewDirection + lightDirection);
-                float dotHV = saturate(dot(H, viewDirection));
+        case BRDF_Heitz_Beckmann:
+        case BRDF_Heitz_StudentT:
+        case BRDF_Heitz_GGX:
+            {
                 float dotNL = saturate(dot(normal, lightDirection));
                 BRDFLobes lobes = Heitz(normal, viewDirection, lightDirection, material);
-                float3 f0Lambda = RGBToSpectrumTable3(lambda, lobes.F0Rgb);
-                return reconstructSpectral3(lobes, material, lambda, dotNL, dotHV, f0Lambda);
-            }
-        case BRDF_StudentT:{
-                float3 H = normalize(viewDirection + lightDirection);
-                float dotHV = saturate(dot(H, viewDirection));
-                float dotNL = saturate(dot(normal, lightDirection));
-                BRDFLobes lobes = StudentT_BRDF(normal, viewDirection, lightDirection, material);
-                float3 f0Lambda = RGBToSpectrumTable3(lambda, lobes.F0Rgb);
-                return reconstructSpectral3(lobes, material, lambda, dotNL, dotHV, f0Lambda);
+                return reconstructSpectral3_Heitz(lobes, material, lambda, dotNL);
             }
         case BRDF_GGX:
         default:

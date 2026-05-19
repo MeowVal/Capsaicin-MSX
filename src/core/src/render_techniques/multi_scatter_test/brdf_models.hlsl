@@ -2,7 +2,6 @@
 #define BRDF_MODELS_HLSL
 #include "math/math_constants.hlsl"
 #include "materials/material_evaluation.hlsl"
-#include "components/random_number_generator/random_number_generator.hlsl"
 
 #define M_PI			3.14159265358979323846f	/* pi */
 #define INV_M_PI		0.31830988618379067153f /* 1/pi */
@@ -165,6 +164,12 @@ BRDFLobes FastMSX(float3 N, float3 V, float3 L, MaterialBRDF material)
     r.F0Rgb = f0;
     return r;
 }
+enum NDFType : uint
+{
+    NDF_Beckmann = 0,
+    NDF_GGX = 1,
+    NDF_StudentT = 2
+};
 
 bool IsFiniteNumber(float x)
 {
@@ -466,7 +471,7 @@ float slopeGGX_P22(float slopeX, float slopeY, float alphaX, float alphaY)
     return 1.0f / (M_PI * alphaX * alphaY * tmp * tmp);
 }
 
-float slopeGGXLambda(float3 wi, float alphaX, float alphaY)
+float slopeGGX_Lambda(float3 wi, float alphaX, float alphaY)
 {
     if (wi.z > 0.9999f)
         return 0.0f;
@@ -481,7 +486,7 @@ float slopeGGXLambda(float3 wi, float alphaX, float alphaY)
     return value;
 }
 
-float slopeGGXProjectedArea(float3 wi, float alphaX, float alphaY)
+float slopeGGX_ProjectedArea(float3 wi, float alphaX, float alphaY)
 {
     if (wi.z > 0.9999f)
         return 1.0f;
@@ -496,7 +501,7 @@ float slopeGGXProjectedArea(float3 wi, float alphaX, float alphaY)
     return value;
 }
 
-float2 slopeGGXsampleP22_11(float thetaI, float u, float u2)
+float2 slopeGGX_SampleP22_11(float thetaI, float u, float u2)
 {
     float2 slope;
 
@@ -550,33 +555,119 @@ float2 slopeGGXsampleP22_11(float thetaI, float u, float u2)
 
     return slope;
 }
+float deriveGammaFromAlpha(float alpha)
+{
+    return lerp(4.0f, 2.0f, alpha);
+}
+
+float slopeStudentT_P22(float sx, float sy, float alphaX, float alphaY)
+{
+    float gamma = deriveGammaFromAlpha(alphaX);
+    float r2 =
+        (sx * sx) / (alphaX * alphaX) +
+        (sy * sy) / (alphaY * alphaY);
+
+    float base = (gamma - 1.0) / ((gamma - 1.0) + r2);
+    return pow(base, gamma) / (PI * alphaX * alphaY);
+}
+
+float auxF(float u, float g)
+{
+    return atan(2.00141 - 1.6253863790572571 * g) *
+           sin(0.993127 *
+               (-1.00658 + u -
+                (0.0209307 * (-2.63062 + g) * u) / (2.19417 + g)) *
+               tan(u));
+}
+
+float auxF2(float x, float g)
+{
+    float u = x / sqrt(1.0 + x * x);
+    return 1.0 + 1.0 / erfApprox(auxF(u, g) / (1.0 - u));
+}
+
+float slopeStudentT_ProjectedArea(float3 wi, float alphaX, float alphaY)
+{
+    float gamma = deriveGammaFromAlpha(alphaX);
+    float u = wi.z;
+    if (u > 0.9999)
+        return 1.0;
+    if (u < -0.9999)
+        return 0.0;
+
+    float alphaI = slopeAlphaI(wi, alphaX, alphaY);
+
+    
+    float thetaI = acos(u);
+    float x = 1.0 / tan(thetaI) / alphaI;
+
+    if (u > 0.0)
+        return 0.5 * u * auxF2(x, gamma);
+    else
+        return -0.5 * u * auxF2(-x, gamma) + u;
+}
+
+float slopeStudentT_Lambda(float3 w, float alphaX, float alphaY)
+{
+    float a = slopeStudentT_ProjectedArea(w, alphaX, alphaY);
+    return max(0.0, a - 1.0);
+}
 
 
-float slopeD(float3 wm, float alphaX, float alphaY, bool beckmann)
+
+float slopeD(float3 wm, float alphaX, float alphaY, int ndfType)
 {
     // slope of wm
     float slopeX = -wm.x / wm.z;
     float slopeY = -wm.y / wm.z;
 
-    float p22 = beckmann ? slopeBeckmannP22(slopeX, slopeY, alphaX, alphaY) : slopeGGX_P22(slopeX, slopeY, alphaX, alphaY);
+    float p22;
+    switch (ndfType)
+    {
+        case NDF_StudentT:
+            p22 = slopeStudentT_P22(slopeX, slopeY, alphaX, alphaY);
+            break;
+        case NDF_GGX:
+            p22 = slopeGGX_P22(slopeX, slopeY, alphaX, alphaY);
+            break;
+        case NDF_Beckmann:                           
+        default:
+            p22 = slopeBeckmannP22(slopeX, slopeY, alphaX, alphaY);
+            break;
+
+    }
 
     return p22 / (wm.z * wm.z * wm.z);
 }
 
-float slopeDwi(float3 wi, float3 wm, float alphaX, float alphaY, bool beckmann)
+float slopeDwi(float3 wi, float3 wm, float alphaX, float alphaY, int ndfType)
 {
     if (wm.z <= 0.0f)
         return 0.0f;
 
     // Normalization coefficient
-    float projectedArea = beckmann ? slopeBeckmannProjectedArea(wi, alphaX, alphaY) : slopeGGXProjectedArea(wi, alphaX, alphaY);
+    float projectedArea;
+    switch (ndfType)
+    {
+        case NDF_StudentT:
+            projectedArea = slopeStudentT_ProjectedArea(wi, alphaX, alphaY);
+            break;
+        case NDF_GGX:
+            projectedArea = slopeGGX_ProjectedArea(wi, alphaX, alphaY);
+            break;
+        case NDF_Beckmann:                                                  
+        default:
+            projectedArea = slopeBeckmannProjectedArea(wi, alphaX, alphaY);
+            break;
+
+    }
     if (projectedArea == 0.0f)
         return 0.0f;
 
     float c = 1.0f / projectedArea;
 
     // Visible NDF value
-    float value = c * max(0.0f, dot(wi, wm)) * slopeD(wm, alphaX, alphaY, beckmann);
+    float value = c * max(0.0f, dot(wi, wm)) * slopeD(wm, alphaX, alphaY, ndfType);
     return value;
 }
 
@@ -587,7 +678,7 @@ float3 slopeSampleDwi(float3 wi, float u1, float u2, float alphaX, float alphaY,
 
     // Sample visible slopes for alpha = 1
     float theta = acos(wi_11.z);
-    float2 slope_11 = beckmann ? slopeBeckmannSampleP22_11(theta, u1, u2) : slopeGGXsampleP22_11(theta, u1, u2);
+    float2 slope_11 = beckmann ? slopeBeckmannSampleP22_11(theta, u1, u2) : slopeGGX_SampleP22_11(theta, u1, u2);
 
     // Rotate slopes to align with wi_11
     float phi = atan2(wi_11.y, wi_11.x);
@@ -615,12 +706,151 @@ float3 slopeSampleDwi(float3 wi, float u1, float u2, float alphaX, float alphaY,
     float3 wm = normalize(float3(-slope.x, -slope.y, 1.0f));
     return wm;
 }
-
-float slopeLambda(float3 wi, float alphaX, float alphaY, bool beckmann)
+float myGamma(float x)
 {
-    return beckmann
-        ? slopeBeckmannLambda(wi, alphaX, alphaY)
-        : slopeGGXLambda(wi, alphaX, alphaY);
+    float result = exp(abgam(x + 5)) / (x * (x + 1) * (x + 2) * (x + 3) * (x + 4));
+    return result;
+}
+
+float pTerm1(float u, float gamma)
+{
+    return (3 * sqrt(3 - 3 * pow(u, 2))) /
+           (pow(1 + pow(u, 2) / (3 - 3 * pow(u, 2)), 2.5) *
+            (8 * u - (81 * pow(-1 + pow(u, 2), 3)) / pow(3 - 2 * pow(u, 2), 2.5) -
+             (pow(u, 2) * sqrt(3 - 2 * pow(u, 2)) * sqrt((-1 + pow(u, 2)) / (-3 + 2 * pow(u, 2))) *
+              (135 - 210 * pow(u, 2) + 83 * pow(u, 4))) /
+                 (pow(-1 + pow(u, 2), 3) * pow((-3 + 2 * pow(u, 2)) / (-1 + pow(u, 2)), 2.5))));
+}
+
+float pTerm2(float u, float x)
+{
+    return pow(u, 0.809494 + 0.170783 / (-1.1224 + x)) /
+           (1 + pow(u, 0.145598 + 0.000805627 * x + atan(1.05504 * (-2.91109 + pow(x, 2)))));
+}
+
+template<typename RNG>
+float NormalSample(inout RNG rng)
+{
+    float2 u = rng.rand2();
+    float r = sqrt(-2.0f * log(max(u.x, 1e-7f)));
+    float theta = 6.28318530718f * u.y;
+    return r * cos(theta);
+}
+
+template<typename RNG>
+float RandomGamma(inout RNG rng, float a)
+{
+    float boost = 1.0f;
+    if (a < 1.0f)
+    {
+        boost = pow(rng.rand(), 1.0f / a);
+        a += 1.0f;
+    }
+
+    float d = a - 1.0f / 3.0f;
+    float c = 1.0f / sqrt(9.0f * d);
+
+    for (int i = 0; i < 64; i++)
+    {
+        float x = NormalSample(rng);
+        float v = 1.0f + c * x;
+        if (v <= 0.0f)
+            continue;
+
+        v = v * v * v;
+        float u = rng.rand();
+
+        if (u < 1.0f - 0.0331f * x * x * x * x)
+            return d * v * boost;
+
+        if (log(u) < 0.5f * x * x + d * (1.0f - v + log(v)))
+            return d * v * boost;
+    }
+
+    return d * boost;
+}
+
+float asinh_approx(float x)
+{
+    return log(x + sqrt(x * x + 1.0f));
+}
+
+template<typename RNG>
+float sampleMPrime(float u, float gamma, inout RNG rng)
+{
+    if (u < 0.0)
+    {
+        float y = gamma;
+        float a = -1.49293 + y - (0.0655156 * (0.0442664 + u)) / (1.20697 + cos(0.633638 + y));
+        float c = 1.00448 + (0.0138041 + u) / (-0.850096 - u + 0.516877 * pow(y, 2) - asinh_approx(u));
+
+        float m1 = (sqrt(-1 + y) * (-3 + 2 * y) * (-6 * pow(PI, 1.5) * u * pow(-1 + y, 3.5) * (-4 + 3 * y) * pow(myGamma(-1 + y), 3) + 4 * (4 * pow(-1 + y, 2) * (-3 + pow(u, 2) + (3 + pow(u, 2)) * y) * pow(myGamma(-0.5 + y), 3) + pow(2, 3 - 2 * y) * PI * u * pow(-1 + y, 2.5) * (-14 + 13 * y) * myGamma(-0.5 + y) * myGamma(-2 + 2 * y) + (pow(PI, 1.5) * (-6 * (-1 + y) * (-4 + 3 * y) + pow(u, 2) * (8 - 5 * pow(y, 2))) * myGamma(y) * myGamma(-1 + 2 * y)) / pow(4, y)))) /
+                          (2. * (16 * (pow(u, 2) * (-2 + y) + 3 * (-1 + y)) * pow(-1 + y, 2.5) *
+                                     pow(myGamma(-0.5 + y), 3) +
+                                 pow(2, 5 - 2 * y) * PI * u * pow(-1 + y, 3) * (-20 + 13 * y) *
+                                     myGamma(-0.5 + y) * myGamma(-2 + 2 * y) +
+                                 pow(PI, 1.5) * myGamma(y) * (-3 * u * (-3 + 2 * y) * (-4 + 3 * y) * pow(myGamma(y), 2) - pow(2, 3 - 2 * y) * pow(-1 + y, 1.5) * (6 * (-1 + y) * (-4 + 3 * y) + pow(u, 2) * (-2 + y) * (-6 + 5 * y)) * myGamma(-2 + 2 * y))));
+
+        float b = m1 * myGamma(a) / myGamma(a + 1 / c);
+
+        return pow(RandomGamma(rng, a), 1.0 / c) * b;
+    }
+
+    float xi1 = rng.rand();
+    float p1 = pTerm1(u, gamma);
+    float p2 = pTerm2(u, gamma);
+    float gamma_width = 1 / (1 - pow(u, 2) / ((-1 + gamma) * (-1 + pow(u, 2))));
+    if (xi1 < p1)
+    {
+        // term 1
+        return RandomGamma(rng, -1.5 + gamma) * gamma_width;
+    }
+    else
+    {
+        if (xi1 < p1 + p2)
+        {
+            // term 2
+            return RandomGamma(rng, gamma - 1.0);
+        }
+        else
+        {
+            // term 3
+            float m = RandomGamma(rng, gamma - 1.0);
+            while (rng.rand() > erfApprox(u * sqrt(-(m / ((-1 + gamma) * (-1 + pow(u, 2)))))))
+            {
+                m = RandomGamma(rng, gamma - 1.0);
+            }
+            return m;
+        }
+    }
+
+}
+
+template<typename RNG>
+float3 slopeStudentT_SampleDwi(float3 wi, float u1, float u2, float alphaX, float alphaY, inout RNG rng)
+{
+    float gamma = deriveGammaFromAlpha(alphaX);
+    float m_prime = sampleMPrime(wi.z, gamma, rng);
+    float beckRough = 1.0 / sqrt(m_prime / (gamma - 1.0));
+
+    // reuse your existing Beckmann visible-normal sampler:
+    return slopeSampleDwi(wi, u1, u2, beckRough * alphaX, beckRough * alphaY, true);
+}
+
+
+float slopeLambda(float3 wi, float alphaX, float alphaY, int ndfType)
+{
+    switch (ndfType)
+    {
+        case NDF_StudentT:
+            return slopeStudentT_Lambda(wi, alphaX, alphaY);
+        case NDF_GGX:
+            return slopeGGX_Lambda(wi, alphaX, alphaY);
+        case NDF_Beckmann:
+        default:
+            return slopeBeckmannLambda(wi, alphaX, alphaY);
+
+    }
 }
 
 /************* MICROSURFACE *************/
@@ -685,30 +915,31 @@ float microsurfaceSampleHeight(float3 wr, float hr, float u, bool heightUniform,
     return h;
 }
 
-float conductorEvalPhaseFunction(float3 wi, float3 wo, float alphaX, float alphaY, bool beckmann)
+float conductorEvalPhaseFunction(float3 wi, float3 wo, float alphaX, float alphaY, int ndfType)
 {
     float3 wh = normalize(wi + wo);
     if (wh.z < 0.0f)
         return 0.0f;
 
-    float Dwi = slopeDwi(wi, wh, alphaX, alphaY, beckmann);
+    float Dwi = slopeDwi(wi, wh, alphaX, alphaY, ndfType);
     return 0.25f * Dwi / dot(wi, wh);
 }
 
-float3 conductorSamplePhaseFunction(float3 wi, float2 u, float alphaX, float alphaY, bool beckmann)
+template<typename RNG>
+float3 conductorSamplePhaseFunction(float3 wi, float2 u, float alphaX, float alphaY, bool beckmann, bool studentT, inout RNG rng)
 {
-    float3 wm = slopeSampleDwi(wi, u.x, u.y, alphaX, alphaY, beckmann);
+    float3 wm = studentT ? slopeStudentT_SampleDwi(wi, u.x, u.y, alphaX, alphaY, rng) : slopeSampleDwi(wi, u.x, u.y, alphaX, alphaY, beckmann);
     float3 wo = -wi + 2.0f * wm * dot(wi, wm);
     return wo;
 }
 
-float conductorEvalSingleScattering(float3 wi, float3 wo, float alphaX, float alphaY, bool beckmann)
+float conductorEvalSingleScattering(float3 wi, float3 wo, float alphaX, float alphaY, int ndfType)
 {
     float3 wh = normalize(wi + wo);
-    float D = slopeD(wh, alphaX, alphaY, beckmann);
+    float D = slopeD(wh, alphaX, alphaY, ndfType);
 
-    float LambdaI = slopeLambda(wi, alphaX, alphaY, beckmann);
-    float LambdaO = slopeLambda(wo, alphaX, alphaY, beckmann);
+    float LambdaI = slopeLambda(wi, alphaX, alphaY, ndfType);
+    float LambdaO = slopeLambda(wo, alphaX, alphaY, ndfType);
     float G2 = 1.0f / (1.0f + LambdaI + LambdaO);
 
     return D * G2 / (4.0f * wi.z);
@@ -739,7 +970,7 @@ float dielectricFresnel(float3 wi, float3 wm, float eta)
     return 0.5f * (Rs * Rs + Rp * Rp);
 }
 
-float dielectricEvalPhaseFunctionCore(float3 wi, float3 wo, bool wiOutside, bool woOutside, float alphaX, float alphaY, bool beckmann, float eta)
+float dielectricEvalPhaseFunctionCore(float3 wi, float3 wo, bool wiOutside, bool woOutside, float alphaX, float alphaY, int ndfType, float eta)
 {
     float etaLocal = wiOutside ? eta : 1.0f / eta;
 
@@ -753,7 +984,7 @@ float dielectricEvalPhaseFunctionCore(float3 wi, float3 wo, bool wiOutside, bool
             wo = -wo;
         }
 
-        float Dwi = slopeDwi(wi, wh, alphaX, alphaY, beckmann);
+        float Dwi = slopeDwi(wi, wh, alphaX, alphaY, ndfType);
         float F = dielectricFresnel(wi, wh, etaLocal);
 
         return 0.25f * Dwi / dot(wi, wh) * F;
@@ -770,7 +1001,7 @@ float dielectricEvalPhaseFunctionCore(float3 wi, float3 wo, bool wiOutside, bool
         if (wiOutside)
         {
             float F = dielectricFresnel(wi, wh, etaLocal);
-            float Dwi = slopeDwi(wi, wh, alphaX, alphaY, beckmann);
+            float Dwi = slopeDwi(wi, wh, alphaX, alphaY, ndfType);
 
             value = etaLocal * etaLocal * (1.0f - F) *
                     Dwi * max(0.0f, -dot(wo, wh)) *
@@ -783,7 +1014,7 @@ float dielectricEvalPhaseFunctionCore(float3 wi, float3 wo, bool wiOutside, bool
             wh = -wh;
 
             float F = dielectricFresnel(wi, wh, etaLocal);
-            float Dwi = slopeDwi(wi, wh, alphaX, alphaY, beckmann);
+            float Dwi = slopeDwi(wi, wh, alphaX, alphaY, ndfType);
 
             value = etaLocal * etaLocal * (1.0f - F) *
                     Dwi * max(0.0f, -dot(wo, wh)) *
@@ -794,14 +1025,14 @@ float dielectricEvalPhaseFunctionCore(float3 wi, float3 wo, bool wiOutside, bool
     }
 }
 
-float dielectricEvalPhaseFunction(float3 wi, float3 wo, float alphaX, float alphaY, bool beckmann, float eta)
+float dielectricEvalPhaseFunction(float3 wi, float3 wo, float alphaX, float alphaY, int ndfType, float eta)
 {
-    return dielectricEvalPhaseFunctionCore(wi, wo, true, true, alphaX, alphaY, beckmann, eta) 
+    return dielectricEvalPhaseFunctionCore(wi, wo, true, true, alphaX, alphaY, ndfType, eta)
            +
-           dielectricEvalPhaseFunctionCore(wi, wo, true, false, alphaX, alphaY, beckmann, eta);
+           dielectricEvalPhaseFunctionCore(wi, wo, true, false, alphaX, alphaY, ndfType, eta);
 }
 template<typename RNG>
-float3 dielectricSamplePhaseFunction(float3 wi, RNG rng, bool wiOutside, out bool woOutside, float alphaX, float alphaY, bool beckmann, float eta)
+float3 dielectricSamplePhaseFunction(float3 wi, inout RNG rng, bool wiOutside, out bool woOutside, float alphaX, float alphaY, bool beckmann, float eta, bool studentT)
 {
     float u1 = rng.rand();
     float u2 = rng.rand();
@@ -809,8 +1040,8 @@ float3 dielectricSamplePhaseFunction(float3 wi, RNG rng, bool wiOutside, out boo
     float etaLocal = wiOutside ? eta : 1.0f / eta;
 
     float3 wm = wiOutside
-        ? slopeSampleDwi(wi, u1, u2, alphaX, alphaY, beckmann)
-        : -slopeSampleDwi(-wi, u1, u2, alphaX, alphaY, beckmann);
+        ? studentT ? slopeStudentT_SampleDwi(wi, u1, u2, alphaX, alphaY, rng) : slopeSampleDwi(wi, u1, u2, alphaX, alphaY, beckmann)
+        : studentT ? -slopeStudentT_SampleDwi(wi, u1, u2, alphaX, alphaY, rng) : -slopeSampleDwi(-wi, u1, u2, alphaX, alphaY, beckmann);
 
     float F = dielectricFresnel(wi, wm, etaLocal);
 
@@ -828,7 +1059,7 @@ float3 dielectricSamplePhaseFunction(float3 wi, RNG rng, bool wiOutside, out boo
     }
 }
 
-float dielectricEvalSingleScattering(float3 wi, float3 wo, float alphaX, float alphaY, bool beckmann, float eta)
+float dielectricEvalSingleScattering(float3 wi, float3 wo, float alphaX, float alphaY, int ndfType, float eta)
 {
     bool woOutside = (wo.z > 0.0f);
     bool wiOutside = true;
@@ -836,10 +1067,10 @@ float dielectricEvalSingleScattering(float3 wi, float3 wo, float alphaX, float a
     if (woOutside)
     {
         float3 wh = normalize(wi + wo);
-        float D = slopeD(wh, alphaX, alphaY, beckmann);
+        float D = slopeD(wh, alphaX, alphaY, ndfType);
 
-        float LambdaI = slopeLambda(wi, alphaX, alphaY, beckmann);
-        float LambdaO = slopeLambda(wo, alphaX, alphaY, beckmann);
+        float LambdaI = slopeLambda(wi, alphaX, alphaY, ndfType);
+        float LambdaO = slopeLambda(wo, alphaX, alphaY, ndfType);
         float G2 = 1.0f / (1.0f + LambdaI + LambdaO);
 
         float F = dielectricFresnel(wi, wh, eta);
@@ -851,10 +1082,10 @@ float dielectricEvalSingleScattering(float3 wi, float3 wo, float alphaX, float a
         if (eta < 1.0f)
             wh = -wh;
 
-        float D = slopeD(wh, alphaX, alphaY, beckmann);
+        float D = slopeD(wh, alphaX, alphaY, ndfType);
 
-        float LambdaI = slopeLambda(wi, alphaX, alphaY, beckmann);
-        float LambdaO = slopeLambda(-wo, alphaX, alphaY, beckmann);
+        float LambdaI = slopeLambda(wi, alphaX, alphaY, ndfType);
+        float LambdaO = slopeLambda(-wo, alphaX, alphaY, ndfType);
 
         float G2 = (float) betaFunc(1.0f + LambdaI, 1.0f + LambdaO);
 
@@ -885,15 +1116,17 @@ void buildOrthonormalBasis(out float3 omega1, out float3 omega2, float3 omega3)
     }
 }
 
-float diffuseEvalPhaseFunction(float3 wi, float3 wo, float2 u, float alphaX, float alphaY, bool beckmann)
+template<typename RNG>
+float diffuseEvalPhaseFunction(float3 wi, float3 wo, float2 u, float alphaX, float alphaY, bool beckmann, bool studentT, inout RNG rng)
 {
-    float3 wm = slopeSampleDwi(wi, u.x, u.y, alphaX, alphaY, beckmann);
+    float3 wm = studentT ? slopeStudentT_SampleDwi(wi, u.x, u.y, alphaX, alphaY, rng) : slopeSampleDwi(wi, u.x, u.y, alphaX, alphaY, beckmann);
     return INV_M_PI * max(0.0f, dot(wo, wm));
 }
 
-float3 diffuseSamplePhaseFunction(float3 wi, float4 u, float alphaX, float alphaY, bool beckmann)
+template<typename RNG>
+float3 diffuseSamplePhaseFunction(float3 wi, float4 u, float alphaX, float alphaY, bool beckmann, bool studentT, inout RNG rng)
 {
-    float3 wm = slopeSampleDwi(wi, u.x, u.y, alphaX, alphaY, beckmann);
+    float3 wm = studentT ? slopeStudentT_SampleDwi(wi, u.x, u.y, alphaX, alphaY, rng) : slopeSampleDwi(wi, u.x, u.y, alphaX, alphaY, beckmann);
 
     float3 w1, w2;
     buildOrthonormalBasis(w1, w2, wm);
@@ -925,27 +1158,26 @@ float3 diffuseSamplePhaseFunction(float3 wi, float4 u, float alphaX, float alpha
     float3 wo = x * w1 + y * w2 + z * wm;
     return wo;
 }
-
-float diffuseEvalSingleScattering(float3 wi, float3 wo, float2 u, float alphaX, float alphaY, bool beckmann)
+float diffuseEvalSingleScattering(float3 wi, float3 wo, float2 u, float alphaX, float alphaY, bool beckmann, int ndfType)
 {
-    float3 wm = slopeSampleDwi(wi, u.x, u.y, alphaX, alphaY, beckmann);
+    float3 wm =  slopeSampleDwi(wi, u.x, u.y, alphaX, alphaY, beckmann);
 
-    float Lambda_i = slopeLambda(wi, alphaX, alphaY, beckmann);
-    float Lambda_o = slopeLambda(wo, alphaX, alphaY, beckmann);
+    float Lambda_i = slopeLambda(wi, alphaX, alphaY, ndfType);
+    float Lambda_o = slopeLambda(wo, alphaX, alphaY, ndfType);
     float G2_given_G1 = (1.0f + Lambda_i) / (1.0f + Lambda_i + Lambda_o);
 
     float value = INV_M_PI * max(0.0f, dot(wm, wo)) * G2_given_G1;
     return value;
 }
 template<typename RNG>
-float3 samplePhaseFunction(float3 wi, bool isConductor, bool isDielectric, float alphaX, float alphaY, bool beckmann, float eta, inout RNG rng)
+float3 samplePhaseFunction(float3 wi, bool isConductor, bool isDielectric, float alphaX, float alphaY, bool beckmann, bool studentT, float eta, inout RNG rng)
 {
     if (isConductor)
     {
         float2 u = float2(rng.rand(), rng.rand());
         return conductorSamplePhaseFunction(wi, u,
                                             alphaX, alphaY,
-                                            beckmann);
+                                            beckmann, studentT, rng);
     }
 
     if (isDielectric)
@@ -956,17 +1188,17 @@ float3 samplePhaseFunction(float3 wi, bool isConductor, bool isDielectric, float
                                              woOutside,
                                              alphaX, alphaY,
                                              beckmann,
-                                             eta);
+                                             eta, studentT);
     }
 
     // diffuse microsurface
     float4 u = float4(rng.rand(), rng.rand(), rng.rand(), rng.rand());
     return diffuseSamplePhaseFunction(wi, u,
                                       alphaX, alphaY,
-                                      beckmann);
+                                      beckmann, studentT, rng);
 }
 template<typename RNG>
-float3 microsurfaceSample(MaterialBRDF material, float3 wi, out int scatteringOrder, bool heightUniform, float alphaX, float alphaY, bool beckmann, inout RNG randomNG)
+float3 microsurfaceSample(MaterialBRDF material, float3 wi, out int scatteringOrder, bool heightUniform, float alphaX, float alphaY, bool beckmann, inout RNG randomNG, bool studentT)
 {
     // init
     float3 wr = -wi;
@@ -997,7 +1229,7 @@ float3 microsurfaceSample(MaterialBRDF material, float3 wi, out int scatteringOr
         scatteringOrder++;
 
         // next direction
-        wr = samplePhaseFunction(-wr, isConductor, isDielectric, alphaX, alphaY, beckmann, material.ior, randomNG);
+        wr = samplePhaseFunction(-wr, isConductor, isDielectric, alphaX, alphaY, beckmann, studentT, material.ior, randomNG);
 
         // numerical safety
         if (!isfinite(hr) || !isfinite(wr.z))
@@ -1021,17 +1253,24 @@ float EssApprox(float rough, float3 f0)
     return saturate(Ess); 
 }
 
+void buildTangentFrame(float3 N, out float3 T, out float3 B)
+{
+    float3 up = (abs(N.z) < 0.999f) ? float3(0, 0, 1) : float3(0, 1, 0);
+    T = normalize(cross(up, N));
+    B = cross(N, T);
+}
+
+float3 toLocal(float3 v, float3 T, float3 B, float3 N)
+{
+    return float3(dot(v, T), dot(v, B), dot(v, N));
+}
+                       
 BRDFLobes Heitz(float3 N, float3 V, float3 L, MaterialBRDF material)
 {
     BRDFLobes r;
     r.isMetal = (material.metallicity > 0.5);
-    float3 H = normalize(V + L);
-    float rough = material.roughnessAlpha;
-
     float NdotV = saturate(dot(N, V));
     float NdotL = saturate(dot(N, L));
-    float NdotH = saturate(dot(N, H));
-    float VdotH = saturate(dot(V, H));
 
     if (NdotL <= 0.0 || NdotV <= 0.0)
     {
@@ -1042,42 +1281,62 @@ BRDFLobes Heitz(float3 N, float3 V, float3 L, MaterialBRDF material)
         return r;
     }
 
-    // --- F0 ---
-    float3 f0 = material.F0;
+    float alphaX = material.roughnessAlpha;
+    float alphaY = alphaX;
+    bool isConductor = (material.metallicity > 0.5);
+    bool isDielectric = !isConductor;
+    float specular;
+    bool beckmann;
+    int ndfType;
+        
+    switch (material.brdfType)
+    {
+        case BRDF_Heitz_GGX: 
+            {
+                ndfType = 1;
+                beckmann = false;
+                break;
+            }
+        case BRDF_Heitz_StudentT: 
+            {
+                ndfType = 2;
+                beckmann = true;
+                break;
+            }
+        case BRDF_Heitz_Beckmann:
+        default:
+        {
+                ndfType = 0;
+                beckmann = true;
+                break;
+            }
+    }
+    if (isConductor)
+    {
+        specular = conductorEvalSingleScattering(V, L, alphaX, alphaY, ndfType);
+    }
+    else if (isDielectric)
+    {
+        specular = dielectricEvalSingleScattering(V, L, alphaX, alphaY, ndfType, material.ior);
+    }
+    else
+    {
+       
+        float2 u = float2(0.5, 0.5); // or hash(wi, wo) if you want deterministic
+        specular = diffuseEvalSingleScattering(V, L, u, alphaX, alphaY, beckmann, ndfType);
+    }
+    r.specularSingleShape = specular;
+    
 
-    // --- Fresnel (Schlick) ---
-    float3 F = FresnelSchlick(VdotH, f0);
+    r.specularMultiShape = 0;
 
-    // --- GGX NDF ---
-    float D = GGX_NDF(NdotH, rough);
+    r.F0Rgb = material.F0;
 
-    // --- Smith GGX Geometry (Schlick-GGX) ---
-    float G = SchlickGGX(NdotV, NdotL, rough);
-
-    // --- Single-scattering specular (standard Cook-Torrance) ---
-    r.specularSingleShape = (D * G ) / (4.0 * NdotL * NdotV + 1e-5);
-
-    // --- Heitz-style multiple scattering ---
-
-    // Directional-hemispherical single-scattering energy
-    float Ess = EssApprox(rough, f0);
-    float Ems = 1.0 - Ess; // energy left for multiple scattering
-
-    // Average Fresnel over microfacets (simple, cheap choice)
-
-    // Broad multiple-scattering lobe (Lambert-like BRDF)
-    r.specularMultiShape = Ems * INV_PI;
-
-    // Per-light BRDF -> multiply by NdotL in your lighting loop
-    r.F0Rgb = f0;
-    // --- Diffuse ---
-    // Energy-conserving diffuse for dielectrics.
-    // Metals (metal=1) naturally get no diffuse.
-    float3 kd = (1.0f.xxx - F) * 1.05 * (1.0f - pow(1.0f - saturate(abs(VdotH)), 5.0f));
-    r.diffuseShape = kd.r * INV_PI;
+    r.diffuseShape =  INV_PI;
 
     return r;
 }
+
 float P22StudentT(float sx, float sy, float alpha, float gamma)
 {
     float r2 = sx*sx + sy*sy; 
@@ -1099,20 +1358,6 @@ float D_StudentT(float3 H_local, float alpha, float gamma)
     return P / (hz * hz * hz);
 }
 
-float auxF(float u, float g)
-{
-    return atan(2.00141 - 1.6253863790572571 * g) *
-           sin(0.993127 * (-1.00658 + u -
-                (0.0209307 * (-2.63062 + g) * u) / (2.19417 + g)) * tan(u));
-}
-
-float auxF2(float x, float g)
-{
-    float u = x / sqrt(1.0 + x * x);
-    float num = auxF(u, g);
-    float den = 1.0 - u;
-    return 1.0 + 1.0 / max(1e-6, num / max(1e-6, den));
-}
 float roughnessI(float3 wi_local, float alpha)
 {
     return sqrt(alpha);

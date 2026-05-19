@@ -191,31 +191,33 @@ float3 sampleGGX(float roughnessAlpha, float3 localView, float2 samples)
     float3 sampledLight = reflect(-localView, sampledNormal);
     return sampledLight;
 }
-float3 sampleStudentT(float alpha, float3 localView, float2 samples)
-{
-    // Student-T has no VNDF sampler, so we fall back to GGX VNDF sampling.
-    return sampleGGX(alpha, localView, samples);
-}
+
 template<typename RNG>
 float3 sampleSpecularDirection(MaterialBRDF material, float3 localView, float2 samples, inout RNG randomNG)
 {
     switch (material.brdfType)
     {
-        case BRDF_GGX:
-        case BRDF_CookTorr:
-        case BRDF_Heitz:
-        {
+        case BRDF_Heitz_StudentT:{
                 float scatteringOrder;
                 float alphaX = material.roughnessAlpha;
                 float alphaY = alphaX;
-                return microsurfaceSample(material, localView, scatteringOrder, true, alphaX, alphaY, true,randomNG);
-            }                                                                               
+                return microsurfaceSample(material, localView, scatteringOrder, true, alphaX, alphaY, false, randomNG, true);
+            }
+        case BRDF_Heitz_GGX:{
+                float scatteringOrder;
+                float alphaX = material.roughnessAlpha;
+                float alphaY = alphaX;
+                return microsurfaceSample(material, localView, scatteringOrder, true, alphaX, alphaY, false, randomNG, false);
+            }
+        case BRDF_Heitz_Beckmann:{
+                float scatteringOrder;
+                float alphaX = material.roughnessAlpha;
+                float alphaY = alphaX;
+                return microsurfaceSample(material, localView, scatteringOrder, true, alphaX, alphaY, true,randomNG, false);
+            }        
+        case BRDF_GGX:
+        case BRDF_CookTorr:
         case BRDF_FastMSX:
-            return sampleGGX(material.roughnessAlpha, localView, samples);
-
-        case BRDF_StudentT:
-            return sampleStudentT(material.roughnessAlpha, localView, samples); // optional
-
         default:
             return sampleGGX(material.roughnessAlpha, localView, samples);
     }
@@ -321,15 +323,10 @@ float3 estimateSpecularPeak(MaterialBRDF material, float3 normal, float3 viewDir
     {
         case BRDF_GGX:
         case BRDF_CookTorr:
-        case BRDF_Heitz:
+        case BRDF_Heitz_Beckmann:
+        case BRDF_Heitz_GGX:
+        case BRDF_Heitz_StudentT:
         case BRDF_FastMSX:
-            // All GGX‑based models peak at mirror reflection
-            return calculateGGXSpecularDirection(normal, viewDirection, sqrt(material.roughnessAlpha));
-
-        case BRDF_StudentT:
-            // Student‑T has a heavier tail → peak is still reflection
-            return reflect(-viewDirection, normal);
-
         default:
             return calculateGGXSpecularDirection(normal, viewDirection, sqrt(material.roughnessAlpha));
     }
@@ -405,13 +402,10 @@ float samplePDF(MaterialBRDF material, float dotNH, float dotNV, float3 localVie
     {
         case BRDF_GGX:
         case BRDF_CookTorr:
-        case BRDF_Heitz:
+        case BRDF_Heitz_Beckmann:
+        case BRDF_Heitz_GGX:
         case BRDF_FastMSX:
-            return sampleGGXPDF(material.roughnessAlpha, material.roughnessAlphaSqr, dotNH, dotNV, localView);
-
-        case BRDF_StudentT:
-            return sampleStudentTPDF(material.roughnessAlpha, material.gamma, dotNH, localView, halfVector);
-
+        case BRDF_Heitz_StudentT:
         default:
             return sampleGGXPDF(material.roughnessAlpha, material.roughnessAlphaSqr, dotNH, dotNV, localView);
     }
