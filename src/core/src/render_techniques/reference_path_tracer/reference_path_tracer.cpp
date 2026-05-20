@@ -235,7 +235,7 @@ void ReferencePT::terminate() noexcept
 void ReferencePT::renderGUI(CapsaicinInternal &capsaicin) const noexcept
 {
     int model = options.brdf_model;
-    if (ImGui::Combo("BRDF Model", &model, "GGX\0CookTorrance\0Fast-MSX\0Heitz\0StudentT\0"))
+    if (ImGui::Combo("BRDF Model", &model, "GGX\0Cook Torrance\0Fast-MSX\0Heitz Beckmann\0Heitz StudentT\0Heitz GGX\0"))
     {
         capsaicin.setOption("brdf_model", model);
     }

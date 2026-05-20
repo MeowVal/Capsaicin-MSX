@@ -527,22 +527,33 @@ float3 reconstructSpectral3(BRDFLobes lobes,
 
     return (diffuseLambda + (specularLambda + specularLambdaMulti)) * saturate(dotNL);
 }
-float3 reconstructSpectral3_Heitz(
-    BRDFLobes lobes,
-    MaterialBRDF material,
-    float3 lambda,
-    float dotNL)
+float reconstructSpectralHeitz(BRDFLobes lobes, MaterialBRDF material, float lambda, float dotNL)
+{
+    // Spectral albedo (Lambert diffuse)
+    float albedo_lambda = RGBToSpectrumTableSingle(lambda, material.albedo);
+    float diffuse = albedo_lambda * lobes.diffuseShape;
+
+    float f0Lambda = RGBToSpectrumTableSingle(lambda, lobes.F0Rgb);
+    float specularLambdaSingle = lobes.specularSingleShape;
+    float specularLambdaMulti = lobes.specularMultiShape;
+
+    return (diffuse + (specularLambdaSingle + specularLambdaMulti) * f0Lambda) * saturate(dotNL);
+}
+float3 reconstructSpectral3_Heitz( BRDFLobes lobes, MaterialBRDF material, float3 lambda, float dotNL)
 {
     // Spectral albedo (Lambert diffuse)
     float3 albedo_lambda = RGBToSpectrumTable3(lambda, material.albedo);
     float3 diffuse = albedo_lambda * lobes.diffuseShape;
 
     float3 f0Lambda = RGBToSpectrumTable3(lambda, lobes.F0Rgb);
-    float3 specular = lobes.specularSingleShape * f0Lambda;
+    float3 specularLambdaSingle = lobes.specularSingleShape;
+    float3 specularLambdaMulti = lobes.specularMultiShape;
 
-    return (diffuse + specular) * saturate(dotNL);
+    return (diffuse + (specularLambdaSingle + specularLambdaMulti)*f0Lambda) * saturate(dotNL);
 }
-float evaluateBRDFSpectral(MaterialBRDF material, float3 normal, float3 viewDirection, float3 lightDirection, float lambda)
+
+template<typename RNG>
+float evaluateBRDFSpectral(MaterialBRDF material, float3 normal, float3 viewDirection, float3 lightDirection, float lambda, inout RNG rng, out float pdf)
 {
     switch (material.brdfType)
     {
@@ -551,6 +562,7 @@ float evaluateBRDFSpectral(MaterialBRDF material, float3 normal, float3 viewDire
                 float dotHV = saturate(dot(H, viewDirection));
                 float dotNL = saturate(dot(normal, lightDirection));
                 BRDFLobes lobes = CookTorrance(normal, viewDirection, lightDirection, material);
+                pdf = 0;
                 return reconstructSpectral(lobes, material, lambda, dotNL, dotHV, 0);
             }
         case BRDF_FastMSX:{
@@ -560,23 +572,16 @@ float evaluateBRDFSpectral(MaterialBRDF material, float3 normal, float3 viewDire
                 BRDFLobes lobes = FastMSX(normal, viewDirection, lightDirection, material);
                 float f0Lambda = RGBToSpectrumTableSingle(lambda, lobes.F0Rgb);
                 float fLambda = FresnelSchlickScalar(dotHV, f0Lambda);
+                pdf = 0;
                 return reconstructSpectral(lobes, material, lambda, dotNL, dotHV, fLambda * fLambda);
             }
-        case BRDF_Heitz_Beckmann:{
-                float3 H = normalize(viewDirection + lightDirection);
-                float dotHV = saturate(dot(H, viewDirection));
-                float dotNL = saturate(dot(normal, lightDirection));
-                BRDFLobes lobes = Heitz(normal, viewDirection, lightDirection, material);
-                float f0Lambda = RGBToSpectrumTableSingle(lambda, lobes.F0Rgb);
-                return reconstructSpectral(lobes, material, lambda, dotNL, dotHV, f0Lambda);
-            }
+        case BRDF_Heitz_Beckmann:
+        case BRDF_Heitz_GGX:
         case BRDF_Heitz_StudentT:{
-                float3 H = normalize(viewDirection + lightDirection);
-                float dotHV = saturate(dot(H, viewDirection));
                 float dotNL = saturate(dot(normal, lightDirection));
-                BRDFLobes lobes = StudentT_BRDF(normal, viewDirection, lightDirection, material);
-                float f0Lambda = RGBToSpectrumTableSingle(lambda, lobes.F0Rgb);
-                return reconstructSpectral(lobes, material, lambda, dotNL, dotHV, f0Lambda);
+                BRDFLobes lobes = Heitz(normal, viewDirection, lightDirection, material, rng);
+                pdf = max(lobes.specularSingleShape + lobes.specularMultiShape, 1e-6);
+                return reconstructSpectralHeitz(lobes, material, lambda, dotNL);
             }
         case BRDF_GGX:
         default:
@@ -587,11 +592,14 @@ float evaluateBRDFSpectral(MaterialBRDF material, float3 normal, float3 viewDire
                 float dotNL = saturate(dot(normal, lightDirection));
                 float dotNV = saturate(dot(normal, viewDirection));
                 BRDFLobes lobes = evaluateBRDF_GGX(material, dotHV, dotNH, dotNL, dotNV);
+                pdf = 0;
                 return reconstructSpectral(lobes, material, lambda, dotNL, dotHV, 0);
             }
     }
 }
-float3 evaluateBRDFSpectral3(MaterialBRDF material, float3 normal, float3 viewDirection, float3 lightDirection, float3 lambda)
+
+template<typename RNG>
+float3 evaluateBRDFSpectral3(MaterialBRDF material, float3 normal, float3 viewDirection, float3 lightDirection, float3 lambda, inout RNG randomNG, out float pdf)
 {
     switch (material.brdfType)
     {
@@ -600,6 +608,7 @@ float3 evaluateBRDFSpectral3(MaterialBRDF material, float3 normal, float3 viewDi
                 float dotHV = saturate(dot(H, viewDirection));
                 float dotNL = saturate(dot(normal, lightDirection));
                 BRDFLobes lobes = CookTorrance(normal, viewDirection, lightDirection, material);
+                pdf = 0;
                 return reconstructSpectral3(lobes, material, lambda, dotNL, dotHV, 0);
             }
         case BRDF_FastMSX:{
@@ -607,6 +616,7 @@ float3 evaluateBRDFSpectral3(MaterialBRDF material, float3 normal, float3 viewDi
                 float dotHV = saturate(dot(H, viewDirection));
                 float dotNL = saturate(dot(normal, lightDirection));
                 BRDFLobes lobes = FastMSX(normal, viewDirection, lightDirection, material);
+                pdf = 0;
                 float3 f0Lambda = RGBToSpectrumTable3(lambda, lobes.F0Rgb);
                 float3 fLambda = FresnelSchlickScalar3(dotHV, f0Lambda);
                 return reconstructSpectral3(lobes, material, lambda, dotNL, dotHV, fLambda * fLambda);
@@ -616,7 +626,8 @@ float3 evaluateBRDFSpectral3(MaterialBRDF material, float3 normal, float3 viewDi
         case BRDF_Heitz_GGX:
             {
                 float dotNL = saturate(dot(normal, lightDirection));
-                BRDFLobes lobes = Heitz(normal, viewDirection, lightDirection, material);
+                BRDFLobes lobes = Heitz(normal, viewDirection, lightDirection, material, randomNG);
+                pdf = max(lobes.specularSingleShape + lobes.specularMultiShape, 1e-6);
                 return reconstructSpectral3_Heitz(lobes, material, lambda, dotNL);
             }
         case BRDF_GGX:
@@ -628,6 +639,7 @@ float3 evaluateBRDFSpectral3(MaterialBRDF material, float3 normal, float3 viewDi
                 float dotNL = saturate(dot(normal, lightDirection));
                 float dotNV = saturate(dot(normal, viewDirection));
                 BRDFLobes lobes = evaluateBRDF_GGX(material, dotHV, dotNH, dotNL, dotNV);
+                pdf = 0;
                 return reconstructSpectral3(lobes, material, lambda, dotNL, dotHV, 0);
             }
     }
@@ -660,8 +672,9 @@ float3 evaluateBRDFDiffuseSpecular3(MaterialBRDF material, float dotHV, float do
     return diffuse;
 }
 
+template<typename RNG>
 float sampleBRDFPDFAndEvaluteSpectral(MaterialBRDF material, float3 normal, float3 viewDirection,
-    float3 lightDirection, float lambda, out float reflectanceLambda)
+    float3 lightDirection, float lambda, out float reflectanceLambda, inout RNG randomNG)
 {
 #ifndef DISABLE_SPECULAR_MATERIALS
     // Transform the view+light direction into the surfaces tangent coordinate space (oriented so that z axis is aligned to normal)
@@ -678,16 +691,21 @@ float sampleBRDFPDFAndEvaluteSpectral(MaterialBRDF material, float3 normal, floa
     float dotNH = clamp(halfVector.z, -1.0f, 1.0f);
     float dotNV = clamp(localView.z, -1.0f, 1.0f);
 
-    reflectanceLambda =evaluateBRDFSpectral(material, float3(0, 0, 1), localView, newLight, lambda);
+    float samplePDF;
+    reflectanceLambda = evaluateBRDFSpectral(material, float3(0, 0, 1), localView, newLight, lambda, randomNG, samplePDF);
 
-    // Must use specular direction for H.V to match sampling functions
-    float3 specularLightDirection = estimateSpecularPeak(material, float3(0.0f, 0.0f, 1.0f), localView);
-    float3 specularHalfVector = normalize(localView + specularLightDirection);
-    float specularDotHV = saturate(dot(specularHalfVector, localView));
+    if (samplePDF == 0.0f)
+    {
+      // Must use specular direction for H.V to match sampling functions
+        float3 specularLightDirection = estimateSpecularPeak(material, float3(0.0f, 0.0f, 1.0f), localView);
+        float3 specularHalfVector = normalize(localView + specularLightDirection);
+        float specularDotHV = saturate(dot(specularHalfVector, localView));
 
     // Calculate combined PDF for current sample
     // Note: has some duplicated calculations in evaluateBRDF_GGX and sampleBRDFPDF
-    float samplePDF = sampleBRDFPDF(material, dotNH, dotNL, specularDotHV, dotNV, localView, halfVector);
+        samplePDF = sampleBRDFPDF(material, dotNH, dotNL, specularDotHV, dotNV, localView, halfVector);
+    }
+    
 #else
     // Calculate shading angles
     float dotNL = clamp(dot(normal, lightDirection), -1.0f, 1.0f);
@@ -702,8 +720,9 @@ float sampleBRDFPDFAndEvaluteSpectral(MaterialBRDF material, float3 normal, floa
 #endif
     return samplePDF;
 }
-float sampleBRDFPDFAndEvaluteSpectral(MaterialBRDF material, float3 normal, float3 viewDirection,
-    float3 lightDirection, float3 lambda, out float3 reflectanceLambda)
+template<typename RNG>
+float sampleBRDFPDFAndEvaluteSpectral3(MaterialBRDF material, float3 normal, float3 viewDirection,
+    float3 lightDirection, float3 lambda, out float3 reflectanceLambda, inout RNG randomNG)
 {
 #ifndef DISABLE_SPECULAR_MATERIALS
     // Transform the view+light direction into the surfaces tangent coordinate space (oriented so that z axis is aligned to normal)
@@ -720,16 +739,21 @@ float sampleBRDFPDFAndEvaluteSpectral(MaterialBRDF material, float3 normal, floa
     float dotNH = clamp(halfVector.z, -1.0f, 1.0f);
     float dotNV = clamp(localView.z, -1.0f, 1.0f);
 
-    reflectanceLambda = evaluateBRDFSpectral3(material, float3(0, 0, 1), localView, newLight, lambda);
+    float samplePDF;
+    reflectanceLambda = evaluateBRDFSpectral3(material, float3(0, 0, 1), localView, newLight, lambda, randomNG, samplePDF);
 
-    // Must use specular direction for H.V to match sampling functions
-    float3 specularLightDirection = estimateSpecularPeak(material, float3(0.0f, 0.0f, 1.0f), localView);
-    float3 specularHalfVector = normalize(localView + specularLightDirection);
-    float specularDotHV = saturate(dot(specularHalfVector, localView));
+    if (samplePDF == 0.0f)
+    {
+        // Must use specular direction for H.V to match sampling functions
+        float3 specularLightDirection = estimateSpecularPeak(material, float3(0.0f, 0.0f, 1.0f), localView);
+        float3 specularHalfVector = normalize(localView + specularLightDirection);
+        float specularDotHV = saturate(dot(specularHalfVector, localView));
 
-    // Calculate combined PDF for current sample
-    // Note: has some duplicated calculations in evaluateBRDF_GGX and sampleBRDFPDF
-    float samplePDF = sampleBRDFPDF(material, dotNH, dotNL, specularDotHV, dotNV, localView, halfVector);
+        // Calculate combined PDF for current sample
+        // Note: has some duplicated calculations in evaluateBRDF_GGX and sampleBRDFPDF
+        samplePDF = sampleBRDFPDF(material, dotNH, dotNL, specularDotHV, dotNV, localView, halfVector);
+    }
+    
 #else
     // Calculate shading angles
     float dotNL = clamp(dot(normal, lightDirection), -1.0f, 1.0f);
@@ -744,9 +768,8 @@ float sampleBRDFPDFAndEvaluteSpectral(MaterialBRDF material, float3 normal, floa
 #endif
     return samplePDF;
 }
-
 template<typename RNG>
-float sampleBRDFAndEvaluateSpectral(MaterialBRDF material, inout RNG randomNG, float3 normal, float3 viewDirection, 
+float sampleBRDFAndEvaluateSpectral(MaterialBRDF material, inout RNG randomNG, float3 normal, float3 viewDirection,
 float lambda, out float3 lightDirection, out float pdf)
 {
     // Transform the view direction into the surfaces tangent coordinate space (oriented so that z axis is aligned to normal)
@@ -787,7 +810,7 @@ float lambda, out float3 lightDirection, out float pdf)
 #ifndef DISABLE_SPECULAR_MATERIALS
     float dotNH = clamp(halfVector.z, -1.0f, 1.0f);
     float dotNV = clamp(localView.z, -1.0f, 1.0f);
-    float f_lambda = evaluateBRDFSpectral(material, N, localView, newLight, lambda);
+    float f_lambda = evaluateBRDFSpectral(material, N, localView, newLight, lambda, randomNG, pdf);
     
 #else
     float f_lambda= evaluateBRDFDiffuseSpecular(material, dotHV, dotNL, lambda);
@@ -795,7 +818,8 @@ float lambda, out float3 lightDirection, out float pdf)
     // Calculate combined PDF for current sample
     // Note: has some duplicated calculations in evaluateBRDF_GGX and sampleBRDFPDF
 #ifndef DISABLE_SPECULAR_MATERIALS
-    pdf = sampleBRDFPDF2(material, dotNH, dotNL, dotNV, probabilityBRDF, localView, halfVector);
+    if (pdf == 0)
+        pdf = sampleBRDFPDF2(material, dotNH, dotNL, dotNV, probabilityBRDF, localView, halfVector);
 #else
     pdf = sampleLambertPDF(dotNL);
 #endif
@@ -847,7 +871,7 @@ float3 lambda, out float3 lightDirection, out float pdf)
 #ifndef DISABLE_SPECULAR_MATERIALS
     float dotNH = clamp(halfVector.z, -1.0f, 1.0f);
     float dotNV = clamp(localView.z, -1.0f, 1.0f);
-    float3 f_lambda = evaluateBRDFSpectral3(material, N, localView, newLight, lambda);
+    float3 f_lambda = evaluateBRDFSpectral3(material, N, localView, newLight, lambda, randomNG, pdf);
     
 #else
     float3 f_lambda= evaluateBRDFDiffuseSpecular3(material, dotHV, dotNL, lambda);
@@ -855,7 +879,8 @@ float3 lambda, out float3 lightDirection, out float pdf)
     // Calculate combined PDF for current sample
     // Note: has some duplicated calculations in evaluateBRDF_GGX and sampleBRDFPDF
 #ifndef DISABLE_SPECULAR_MATERIALS
-    pdf = sampleBRDFPDF2(material, dotNH, dotNL, dotNV, probabilityBRDF, localView, halfVector);
+    if (pdf == 0)
+        pdf = sampleBRDFPDF2(material, dotNH, dotNL, dotNV, probabilityBRDF, localView, halfVector);
 #else
     pdf = sampleLambertPDF(dotNL);
 #endif

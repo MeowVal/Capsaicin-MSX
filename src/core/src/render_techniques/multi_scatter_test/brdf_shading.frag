@@ -52,6 +52,7 @@ SamplerState g_TextureSampler;
 #include "components/light_builder/light_builder.hlsl"
 #include "components/random_number_generator/random_number_generator.hlsl"
 #include "components/light_sampler/light_sampler.hlsl"
+#include "components/stratified_sampler/stratified_sampler.hlsl"
 #include "lights/light_sampling.hlsl"
 #include "lights/light_evaluation.hlsl"
 #include "materials/material_evaluation.hlsl"
@@ -91,7 +92,13 @@ float4 main(float4 pos : SV_Position) : SV_Target0
     
     
     
+    const uint id = pos.x + pos.y * g_BufferDimensions.x;
+    const uint frameID = g_FrameIndex;
+    Random randomNG = MakeRandom(id, frameID);
 
+        // Calculate jittered pixel position
+    StratifiedSampler randomStratified = MakeStratifiedSampler(id, frameID);
+    
     Material material = g_MaterialBuffer[instance.material_index];
     MaterialEvaluated me = MakeMaterialEvaluated(material, meshUV);
     MaterialBRDF brdf = MakeMaterialBRDF(me, g_BRDFModel);
@@ -146,7 +153,8 @@ float4 main(float4 pos : SV_Position) : SV_Target0
         
         float3 radiance = evaluateLight(light, worldPos, L);
         
-        float3 f = evaluateBRDF(brdf, N, V, L);
+        float pdf;
+        float3 f = evaluateBRDF(brdf, N, V, L, randomStratified, pdf);
         
         totalLighting += f * radiance * NdotL;
     }

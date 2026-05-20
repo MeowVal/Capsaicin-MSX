@@ -290,7 +290,7 @@ void shadePathHit(RayInfo ray, HitInfo hitData, IntersectData iData, inout Rando
 
 template<typename RadianceT>
 void shadeLightHitCustom(RayInfo ray, MaterialBRDF material, uint currentBounce, float3 normal, float3 viewDirection, float3 throughput,
-    float lightPDF, float3 radianceLi, Light selectedLight, inout RadianceT radiance)
+    float lightPDF, float3 radianceLi, Light selectedLight, inout RadianceT radiance, inout StratifiedSampler randomStratified)
 {
     float3 lambda   = radiance.lambda;
     float3 lambdaLi = RGBToSpectrumTable3(lambda, radianceLi);
@@ -307,7 +307,7 @@ void shadeLightHitCustom(RayInfo ray, MaterialBRDF material, uint currentBounce,
     
 
     float3 reflectanceLambda;
-    float samplePDF = sampleBRDFPDFAndEvaluteSpectral(material, normal, viewDirection, ray.direction, lambda, reflectanceLambda);
+    float samplePDF = sampleBRDFPDFAndEvaluteSpectral3(material, normal, viewDirection, ray.direction, lambda, reflectanceLambda, randomStratified);
     
     if (samplePDF != 0.0f)
     {
@@ -334,10 +334,11 @@ void shadeLightHitCustom(RayInfo ray, MaterialBRDF material, uint currentBounce,
  * @param radianceLi        The radiance visible along sampled light.
  * @param selectedLight     The light that was selected for sampling.
  * @param [in,out] radiance The combined radiance. Any new radiance is added to the existing value and returned.
+ * @param randomStratified  The random number sampler used for the BRDF
  */
 template<typename RadianceT>
 void shadeLightHit(RayInfo ray, MaterialBRDF material, uint currentBounce, float3 normal, float3 viewDirection, float3 throughput,
-    float lightPDF, float3 radianceLi, Light selectedLight, inout RadianceT radiance)
+    float lightPDF, float3 radianceLi, Light selectedLight, inout RadianceT radiance, inout StratifiedSampler randomStratified)
 {
 #if defined(DISABLE_NON_NEE) || (defined(DISABLE_AREA_LIGHTS) && defined(DISABLE_ENVIRONMENT_LIGHTS))
     float3 sampleReflectance = evaluateBRDF(material, normal, viewDirection, ray.direction);
@@ -345,7 +346,7 @@ void shadeLightHit(RayInfo ray, MaterialBRDF material, uint currentBounce, float
 #else
     // Evaluate BRDF for new light direction and calculate PDF for current sample
     float3 sampleReflectance;
-    float samplePDF = sampleBRDFPDFAndEvalute(material, normal, viewDirection, ray.direction, sampleReflectance);
+    float samplePDF = sampleBRDFPDFAndEvalute(material, normal, viewDirection, ray.direction, sampleReflectance, randomStratified);
     if (samplePDF != 0.0f)
     {
         bool deltaLight = isDeltaLight(selectedLight);
@@ -460,7 +461,7 @@ void sampleLightsNEE(MaterialBRDF material, inout StratifiedSampler randomStrati
         ray.range.y = FLT_MAX;
 
         // Add lighting contribution
-        shadeLightHitFunc(ray, material, currentBounce, normal, viewDirection, throughput, lightPDF, radianceLi, selectedLight, radiance);
+        shadeLightHitFunc(ray, material, currentBounce, normal, viewDirection, throughput, lightPDF, radianceLi, selectedLight, radiance, randomStratified);
     }
 #endif // DISABLE_NEE
 }

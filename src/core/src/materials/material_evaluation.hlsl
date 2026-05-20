@@ -256,7 +256,8 @@ float3 reconstructRGB_Heitz(BRDFLobes lobes, MaterialBRDF material, float dotNL)
     return (diffuseRgb + specularRgb) * saturate(dotNL);
 }
 
-float3 evaluateBRDF(MaterialBRDF material, float3 normal, float3 viewDirection, float3 lightDirection)
+template<typename RNG>
+float3 evaluateBRDF(MaterialBRDF material, float3 normal, float3 viewDirection, float3 lightDirection, inout RNG rng, out float pdf)
 {
     switch (material.brdfType)
     {
@@ -265,6 +266,7 @@ float3 evaluateBRDF(MaterialBRDF material, float3 normal, float3 viewDirection, 
                 float dotHV = saturate(dot(H, viewDirection));
                 float dotNL = saturate(dot(normal, lightDirection));
                 BRDFLobes lobes = CookTorrance(normal, viewDirection, lightDirection, material);
+                pdf = 0.0f;
                 return reconstructRGB(lobes, material, dotNL, dotHV, 0.0f.xxx);
             }
         case BRDF_FastMSX:{
@@ -273,13 +275,15 @@ float3 evaluateBRDF(MaterialBRDF material, float3 normal, float3 viewDirection, 
                 float dotNL = saturate(dot(normal, lightDirection));
                 BRDFLobes lobes = FastMSX(normal, viewDirection, lightDirection, material);
                 float3 F = FresnelSchlick(dotHV, lobes.F0Rgb);
+                pdf = 0.0f;
                 return reconstructRGB(lobes, material, dotNL, dotHV, F * F);
             }
         case BRDF_Heitz_GGX:
         case BRDF_Heitz_StudentT:
         case BRDF_Heitz_Beckmann:{
                 float dotNL = saturate(dot(normal, lightDirection));
-                BRDFLobes lobes = Heitz(normal, viewDirection, lightDirection, material);
+                BRDFLobes lobes = Heitz(normal, viewDirection, lightDirection, material, rng);
+                pdf = max(lobes.specularSingleShape + lobes.specularMultiShape, 1e-6);
                 return reconstructRGB_Heitz(lobes, material, dotNL);
             }
         case BRDF_GGX:
@@ -291,8 +295,9 @@ float3 evaluateBRDF(MaterialBRDF material, float3 normal, float3 viewDirection, 
             float dotNL = saturate(dot(normal, lightDirection));
             float dotNV = saturate(dot(normal, viewDirection));
             BRDFLobes lobes = evaluateBRDF_GGX(material, dotHV, dotNH, dotNL, dotNV);
-                return reconstructRGB(lobes, material, dotNL, dotHV, 0.0f.xxx);
-            }
+            pdf = 0;
+            return reconstructRGB(lobes, material, dotNL, dotHV, 0.0f.xxx);
+        }
     }
 }
 /**
