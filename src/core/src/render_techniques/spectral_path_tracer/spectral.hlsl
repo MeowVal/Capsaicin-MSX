@@ -549,7 +549,7 @@ float3 reconstructSpectral3_Heitz( BRDFLobes lobes, MaterialBRDF material, float
     float3 specularLambdaSingle = lobes.specularSingleShape;
     float3 specularLambdaMulti = lobes.specularMultiShape;
 
-    return (diffuse + (specularLambdaSingle + specularLambdaMulti)*f0Lambda) * saturate(dotNL);
+    return (diffuse + (specularLambdaSingle + specularLambdaMulti) * f0Lambda) * saturate(dotNL);
 }
 
 template<typename RNG>

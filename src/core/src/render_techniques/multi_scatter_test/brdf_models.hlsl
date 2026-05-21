@@ -487,78 +487,11 @@ float slopeGGX_Lambda(float3 wi, float alphaX, float alphaY)
     return value;
 }
 
-float slopeGGX_ProjectedArea(float3 wi, float alphaX, float alphaY)
-{
-    if (wi.z > 0.9999f)
-        return 1.0f;
-    if (wi.z < -0.9999f)
-        return 0.0f;
 
-    float thetaI = acos(wi.z);
-    float sinThetaI = sin(thetaI);
-    float alphaI = slopeAlphaI(wi, alphaX, alphaY);
 
-    float value = 0.5f * (wi.z + sqrt(wi.z * wi.z + sinThetaI * sinThetaI * alphaI * alphaI));
-    return value;
-}
-
-float2 slopeGGX_SampleP22_11(float thetaI, float u, float u2)
-{
-    float2 slope;
-
-    if (thetaI < 0.0001f)
-    {
-        float r = sqrt(u / (1.0f - u));
-        float phi = 6.28318530718f * u2;
-        slope.x = r * cos(phi);
-        slope.y = r * sin(phi);
-        return slope;
-    }
-
-    float sinThetaI = sin(thetaI);
-    float cosThetaI = cos(thetaI);
-    float tanThetaI = sinThetaI / cosThetaI;
-
-    float slopeI = cosThetaI / sinThetaI;
-
-    float projectedArea = 0.5f * (cosThetaI + 1.0f);
-    if (projectedArea < 0.0001f || projectedArea != projectedArea)
-        return float2(0.0f, 0.0f);
-
-    float c = 1.0f / projectedArea;
-
-    float A = 2.0f * u / cosThetaI / c - 1.0f;
-    float B = tanThetaI;
-    float tmp = 1.0f / (A * A - 1.0f);
-
-    float D = sqrt(max(0.0f, B * B * tmp * tmp - (A * A - B * B) * tmp));
-    float slopeX1 = B * tmp - D;
-    float slopeX2 = B * tmp + D;
-    slope.x = (A < 0.0f || slopeX2 > 1.0f / tanThetaI) ? slopeX1 : slopeX2;
-
-    float u2Local;
-    float S;
-    if (u2 > 0.5f)
-    {
-        S = 1.0f;
-        u2Local = 2.0f * (u2 - 0.5f);
-    }
-    else
-    {
-        S = -1.0f;
-        u2Local = 2.0f * (0.5f - u2);
-    }
-
-    float z = (u2Local * (u2Local * (u2Local * 0.27385f - 0.73369f) + 0.46341f)) /
-              (u2Local * (u2Local * (u2Local * 0.093073f + 0.309420f) - 1.000000f) + 0.597999f);
-
-    slope.y = S * z * sqrt(1.0f + slope.x * slope.x);
-
-    return slope;
-}
 float deriveGammaFromAlpha(float alpha)
 {
-    return lerp(4.0f, 2.0f, alpha);
+    return lerp(20.0f, 2.0f, alpha);
 }
 
 float slopeStudentT_P22(float sx, float sy, float alphaX, float alphaY)
@@ -640,11 +573,47 @@ float slopeD(float3 wm, float alphaX, float alphaY, int ndfType)
 
     return p22 / (wm.z * wm.z * wm.z);
 }
+float slopeLambda(float3 wi, float alphaX, float alphaY, int ndfType)
+{
+    switch (ndfType)
+    {
+        case NDF_StudentT:
+            return slopeStudentT_Lambda(wi, alphaX, alphaY);
+        case NDF_GGX:
+            return slopeGGX_Lambda(wi, alphaX, alphaY);
+        case NDF_Beckmann:
+        default:
+            return slopeBeckmannLambda(wi, alphaX, alphaY);
+
+    }
+}
+float microsurfaceG1(float3 wi, float alphaX, float alphaY, int ndfType)
+{
+    if (wi.z > 0.9999f)
+        return 1.0f;
+    if (wi.z <= 0.0f)
+        return 0.0f;
+
+    float Lambda = slopeLambda(wi, alphaX, alphaY, ndfType);
+    return 1.0f / (1.0f + Lambda);
+}
 
 float slopeDwi(float3 wi, float3 wm, float alphaX, float alphaY, int ndfType)
 {
     if (wm.z <= 0.0f)
         return 0.0f;
+    if (ndfType == NDF_GGX)
+    {
+        float wiDotWh = max(0.0f, dot(wi, wm));
+        if (wiDotWh <= 0.0f || wi.z <= 0.0f)
+            return 0.0f;
+
+        float D = slopeGGX_P22(-wm.x / wm.z, -wm.y / wm.z, alphaX, alphaY) / (wm.z * wm.z * wm.z);
+        float G1 = microsurfaceG1(wi, alphaX, alphaY, NDF_GGX);
+
+        float denom = max(1e-6f, wi.z);
+        return D * G1 * wiDotWh / denom;
+    }
 
     // Normalization coefficient
     float projectedArea;
@@ -652,9 +621,6 @@ float slopeDwi(float3 wi, float3 wm, float alphaX, float alphaY, int ndfType)
     {
         case NDF_StudentT:
             projectedArea = slopeStudentT_ProjectedArea(wi, alphaX, alphaY);
-            break;
-        case NDF_GGX:
-            projectedArea = slopeGGX_ProjectedArea(wi, alphaX, alphaY);
             break;
         case NDF_Beckmann:                                                  
         default:
@@ -672,14 +638,37 @@ float slopeDwi(float3 wi, float3 wm, float alphaX, float alphaY, int ndfType)
     return value;
 }
 
-float3 slopeSampleDwi(float3 wi, float u1, float u2, float alphaX, float alphaY, bool beckmann)
+float3 sampleGGXVNDF(float3 Ve, float U1, float U2, float alphaX, float alphaY)
+{
+    float3 Vh = normalize(float3(alphaX * Ve.x, alphaY * Ve.y, Ve.z));
+
+    float lensq = Vh.x * Vh.x + Vh.y * Vh.y;
+    float3 T1 = (lensq > 0.0f) ? float3(-Vh.y, Vh.x, 0.0f) * rsqrt(lensq) : float3(1.0f, 0.0f, 0.0f);
+    float3 T2 = cross(Vh, T1);
+
+    float r = sqrt(U1);
+    float phi = 6.28318530718f * U2;
+    float t1 = r * cos(phi);
+    float t2 = r * sin(phi);
+
+    float s = 0.5f * (1.0f + Vh.z);
+    t2 = lerp(sqrt(max(0.0f, 1.0f - t1 * t1)), t2, s);
+
+    float3 Nh = t1 * T1 + t2 * T2 + sqrt(max(0.0f, 1.0f - t1 * t1 - t2 * t2)) * Vh;
+
+    float3 Ne = normalize(float3(alphaX * Nh.x, alphaY * Nh.y, max(0.0f, Nh.z)));
+    return Ne;
+}
+
+
+float3 slopeBeckmannSampleDwi(float3 wi, float u1, float u2, float alphaX, float alphaY)
 {
     // Stretch to isotropic configuration (alpha = 1)
     float3 wi_11 = normalize(float3(alphaX * wi.x, alphaY * wi.y, wi.z));
 
     // Sample visible slopes for alpha = 1
     float theta = acos(wi_11.z);
-    float2 slope_11 = beckmann ? slopeBeckmannSampleP22_11(theta, u1, u2) : slopeGGX_SampleP22_11(theta, u1, u2);
+    float2 slope_11 = slopeBeckmannSampleP22_11(theta, u1, u2);
 
     // Rotate slopes to align with wi_11
     float phi = atan2(wi_11.y, wi_11.x);
@@ -707,6 +696,7 @@ float3 slopeSampleDwi(float3 wi, float u1, float u2, float alphaX, float alphaY,
     float3 wm = normalize(float3(-slope.x, -slope.y, 1.0f));
     return wm;
 }
+
 float myGamma(float x)
 {
     float result = exp(abgam(x + 5)) / (x * (x + 1) * (x + 2) * (x + 3) * (x + 4));
@@ -892,57 +882,29 @@ float3 slopeStudentT_SampleDwi(float3 wi, float u1, float u2, float alphaX, floa
         return float3(0, 0, 1);
 
 
-    float m_prime = sampleMPrime(wi.z, gamma, rng);
+    float m_prime = max(sampleMPrime(wi.z, gamma, rng), 0.001);
 
-    if (!isfinite(m_prime) || m_prime <= 0.0f)
-        return float3(0, 0, 1);
     float denom = m_prime / (gamma - 1.0f);
-    if (!isfinite(denom) || denom <= 0.0f)
-        return float3(0, 0, 1);
-
 
     float beckRough = 1.0f / sqrt(denom);
-    if (!isfinite(beckRough) || beckRough <= 0.0f)
-        return float3(0, 0, 1);
+    beckRough = clamp(beckRough, 0.1f, 4.0f);
 
     float ax = beckRough * alphaX;
     float ay = beckRough * alphaY;
 
     if (!isfinite(ax) || !isfinite(ay) || ax <= 0.0f || ay <= 0.0f)
-        return float3(0, 0, 1);
+        return slopeBeckmannSampleDwi(wi, u1, u2, alphaX, alphaY);
 
     // reuse your existing Beckmann visible-normal sampler:
-    return slopeSampleDwi(wi, u1, u2, ax, ay, true);
+    return slopeBeckmannSampleDwi(wi, u1, u2, ax, ay);
 }
 
 
-float slopeLambda(float3 wi, float alphaX, float alphaY, int ndfType)
-{
-    switch (ndfType)
-    {
-        case NDF_StudentT:
-            return slopeStudentT_Lambda(wi, alphaX, alphaY);
-        case NDF_GGX:
-            return slopeGGX_Lambda(wi, alphaX, alphaY);
-        case NDF_Beckmann:
-        default:
-            return slopeBeckmannLambda(wi, alphaX, alphaY);
 
-    }
-}
 
 /************* MICROSURFACE *************/
 
-float microsurfaceG1(float3 wi, float alphaX, float alphaY, int ndfType)
-{
-    if (wi.z > 0.9999f)
-        return 1.0f;
-    if (wi.z <= 0.0f)
-        return 0.0f;
 
-    float Lambda = slopeLambda(wi, alphaX, alphaY, ndfType);
-    return 1.0f / (1.0f + Lambda);
-}
 
 float microsurfaceG1Height(float3 wi, float h0,
                              bool heightUniform,
@@ -1013,11 +975,11 @@ float3 conductorSamplePhaseFunction(float3 wi, float2 u, float alphaX, float alp
             wm = slopeStudentT_SampleDwi(wi, u.x, u.y, alphaX, alphaY, rng);
             break;
         case NDF_GGX:
-            wm = slopeSampleDwi(wi, u.x, u.y, alphaX, alphaY, false);
+            wm = sampleGGXVNDF(wi, u.x, u.y, alphaX, alphaY);
             break;
         case NDF_Beckmann:
         default:
-            wm = slopeSampleDwi(wi, u.x, u.y, alphaX, alphaY, true);
+            wm = slopeBeckmannSampleDwi(wi, u.x, u.y, alphaX, alphaY);
             break;
     }
 
@@ -1141,12 +1103,12 @@ float3 dielectricSamplePhaseFunction(float3 wi, inout RNG rng, bool wiOutside, o
                 break;
 
             case NDF_GGX:
-                wm = slopeSampleDwi(wi, u1, u2, alphaX, alphaY, false);
+                wm = sampleGGXVNDF(wi, u1, u2, alphaX, alphaY);
                 break;
 
             case NDF_Beckmann:
             default:
-                wm = slopeSampleDwi(wi, u1, u2, alphaX, alphaY, true);
+                wm = slopeBeckmannSampleDwi(wi, u1, u2, alphaX, alphaY);
                 break;
         }
     }
@@ -1159,12 +1121,12 @@ float3 dielectricSamplePhaseFunction(float3 wi, inout RNG rng, bool wiOutside, o
                 break;
 
             case NDF_GGX:
-                wm = -slopeSampleDwi(-wi, u1, u2, alphaX, alphaY, false);
+                wm = -sampleGGXVNDF(-wi, u1, u2, alphaX, alphaY);
                 break;
 
             case NDF_Beckmann:
             default:
-                wm = -slopeSampleDwi(-wi, u1, u2, alphaX, alphaY, true);
+                wm = -slopeBeckmannSampleDwi(-wi, u1, u2, alphaX, alphaY);
                 break;
         }
     }
@@ -1255,13 +1217,13 @@ float diffuseEvalPhaseFunction(float3 wi, float3 wo, float2 u, float alphaX, flo
         }
         case NDF_GGX:
         {
-                wm = slopeSampleDwi(wi, u.x, u.y, alphaX, alphaY, false);
+                wm = sampleGGXVNDF(wi, u.x, u.y, alphaX, alphaY);
                 break;
         }
         case NDF_Beckmann:
         default:
         {
-                wm = slopeSampleDwi(wi, u.x, u.y, alphaX, alphaY, true);
+                wm = slopeBeckmannSampleDwi(wi, u.x, u.y, alphaX, alphaY);
                 break;
         }
     }
@@ -1281,13 +1243,13 @@ float3 diffuseSamplePhaseFunction(float3 wi, float4 u, float alphaX, float alpha
             }
         case NDF_GGX:
         {
-                wm = slopeSampleDwi(wi, u.x, u.y, alphaX, alphaY, false);
+                wm = sampleGGXVNDF(wi, u.x, u.y, alphaX, alphaY);
                 break;
             }
         case NDF_Beckmann:
         default:
         {
-                wm = slopeSampleDwi(wi, u.x, u.y, alphaX, alphaY, true);
+                wm = slopeBeckmannSampleDwi(wi, u.x, u.y, alphaX, alphaY);
                 break;
             }
     }
@@ -1336,13 +1298,13 @@ float diffuseEvalSingleScattering(float3 wi, float3 wo, float2 u, float alphaX, 
             }
         case NDF_GGX:
         {
-                wm = slopeSampleDwi(wi, u.x, u.y, alphaX, alphaY, false);
+                wm = sampleGGXVNDF(wi, u.x, u.y, alphaX, alphaY);
                 break;
             }
         case NDF_Beckmann:
         default:
         {
-                wm = slopeSampleDwi(wi, u.x, u.y, alphaX, alphaY, true);
+                wm = slopeBeckmannSampleDwi(wi, u.x, u.y, alphaX, alphaY);
                 break;
             }
     }
@@ -1693,108 +1655,4 @@ BRDFLobes Heitz(float3 N, float3 V, float3 L, MaterialBRDF material, inout RNG r
 
     return r;
 }
-
-float P22StudentT(float sx, float sy, float alpha, float gamma)
-{
-    float r2 = sx*sx + sy*sy; 
-    float num = gamma - 1.0;
-    float denom = (gamma - 1.0) + r2 / (alpha * alpha);
-
-    float base = num / denom;
-    return pow(base, gamma) / (PI * alpha * alpha);
-}
-float D_StudentT(float3 H_local, float alpha, float gamma)
-{
-    float hz = H_local.z;
-    if (hz <= 0.0) return 0.0;
-
-    float sx = H_local.x / hz;
-    float sy = H_local.y / hz;
-
-    float P = P22StudentT(sx, sy, alpha, gamma);
-    return P / (hz * hz * hz);
-}
-
-float roughnessI(float3 wi_local, float alpha)
-{
-    return sqrt(alpha);
-}
-
-float G1_StudentT(float3 wi_local, float alpha, float gamma)
-{
-    float u = wi_local.z; // cos(theta_i)
-    if (u > 0.9999) return 1.0;
-    if (u <= 0.0) return 0.0;
-
-    float a_i = alpha; // isotropic
-    float theta = acos(u);
-    float x = 1.0 / tan(theta) / max(1e-4, a_i);
-
-    return 0.5 * u * auxF2(x, gamma);
-}
-
-float G_StudentT(float3 V_local, float3 L_local,
-                 float alpha, float gamma)
-{
-    float Gv = G1_StudentT(V_local,alpha, gamma);
-    float Gl = G1_StudentT(L_local, alpha, gamma);
-    return Gv * Gl;
-}
-BRDFLobes StudentT_BRDF(float3 N, float3 V, float3 L,
-    MaterialBRDF material)
-{
-    BRDFLobes r;
-    r.isMetal = (material.metallicity > 0.5);
-    float3 H = normalize(V + L);
-    material.gamma = 3.0; // tail heaviness parameter, controls the "sharpness of the distribution's tails
-    float alpha = material.roughnessAlpha; // isotropic
-    float3 any = abs(N.z) < 0.999 ? float3(0, 0, 1) : float3(1, 0, 0);
-    float3 T = normalize(cross(any, N));
-    float3 B = cross(N, T);
-    float3 V_local = float3(dot(V, T), dot(V, B), dot(V, N));
-    float3 L_local = float3(dot(L, T), dot(L, B), dot(L, N));
-    float3 H_local = float3(dot(H, T), dot(H, B), dot(H, N));
-
-    float NdotV = saturate(dot(N, V));
-    float NdotL = saturate(dot(N, L));
-    float NdotH = saturate(dot(N, H));
-    float VdotH = saturate(dot(V, H));
-
-    if (NdotV <= 0.0 || NdotL <= 0.0)
-    {
-        r.diffuseShape = 0.0;
-        r.specularSingleShape = 0.0;
-        r.specularMultiShape = 0.0;
-        r.F0Rgb = material.F0;
-        return r;
-    }
-    float3 F0 = material.F0;;
-    // Fresnel
-    float3 F = FresnelSchlick(VdotH, F0);
-
-    // NDF from P22
-    float D = D_StudentT(H_local, alpha, material.gamma);
-
-    // Geometry from sigma-approx G1
-    float G = G_StudentT(V_local, L_local, alpha, material.gamma);
-
-    r.specularSingleShape = (D * G ) / (4.0 * NdotV * NdotL + 1e-5);
-
-    // reuse of Heitz MS term 
-    float rough_iso = 0.5 * (alpha + alpha);
-    float Ess = EssApprox(rough_iso, F0);
-    float Ems = 1.0 - Ess;
-    r.specularMultiShape = Ems * INV_PI;
-
-    r.F0Rgb = F0;
-    float3 kd = (1.0f.xxx - F) * 1.05 * (1.0f - pow(1.0f - saturate(abs(VdotH)), 5.0f));
-    r.diffuseShape = kd.r * INV_PI;
-
-    return r;
-}
-
-
-
-
-
 #endif

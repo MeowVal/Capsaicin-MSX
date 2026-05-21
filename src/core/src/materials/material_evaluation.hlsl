@@ -189,7 +189,6 @@ BRDFLobes evaluateBRDF_GGX(MaterialBRDF material, float dotHV, float dotNH, floa
 
 #ifndef DISABLE_SPECULAR_MATERIALS
     // Calculate specular component
-    float3 f;
     float3 spec_rgb = evaluateGGX(material.roughnessAlphaSqr, dotNH, dotNL, dotNV);
     r.specularSingleShape = (spec_rgb.r + spec_rgb.g + spec_rgb.b) * (1.0 / 3.0);
     
@@ -251,7 +250,7 @@ float3 reconstructRGB(BRDFLobes lobes, MaterialBRDF material, float dotNL, float
 float3 reconstructRGB_Heitz(BRDFLobes lobes, MaterialBRDF material, float dotNL)
 {
     float3 diffuseRgb = material.albedo * lobes.diffuseShape;
-    float3 specularRgb = lobes.specularSingleShape * material.F0; // already full BSDF
+    float3 specularRgb = (lobes.specularSingleShape + lobes.specularMultiShape) * material.F0; // already full BSDF
 
     return (diffuseRgb + specularRgb) * saturate(dotNL);
 }

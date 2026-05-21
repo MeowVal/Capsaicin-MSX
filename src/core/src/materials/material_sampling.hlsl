@@ -390,21 +390,6 @@ float calculateBRDFProbability(float3 F0, float dotHV, float3 albedo)
     return probability;
 }
 
-float sampleStudentTPDF(float alpha, float gamma, float dotNH, float3 localView, float3 halfVector)
-{
-
-    float dotVH = saturate(dot(localView, halfVector));
-    if (dotVH <= 0.0 || dotNH <= 0.0) return 0.0;
-
-    float D  = D_StudentT(halfVector, alpha, gamma);
-    float G1 = G1_StudentT(localView, alpha, gamma);
-
-    // Microfacet reflection PDF
-    float pdf = (D * G1 * dotNH) / (4.0 * dotVH);
-
-    return pdf;
-}
-
 float samplePDF(MaterialBRDF material, float dotNH, float dotNV, float3 localView, float3 halfVector)
 {
     switch (material.brdfType)
