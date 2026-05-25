@@ -296,8 +296,7 @@ void shadeLightHitCustom(RayInfo ray, MaterialBRDF material, uint currentBounce,
     float3 lambdaLi = RGBToSpectrumTable3(lambda, radianceLi);
 #if defined(DISABLE_NON_NEE) || (defined(DISABLE_AREA_LIGHTS) && defined(DISABLE_ENVIRONMENT_LIGHTS))
 
-    float pdf;
-    float3 reflectanceLambda = evaluateBRDFSpectral3(material, normal, viewDirection, ray.direction, lambda, randomStratified, pdf);
+    float3 reflectanceLambda = evaluateBRDFSpectral3(material, normal, viewDirection, ray.direction, lambda, randomStratified);
     float3 contribution_lambda = throughput * reflectanceLambda * lambdaLi * (1.0f / lightPDF);
 
     
@@ -342,8 +341,7 @@ void shadeLightHit(RayInfo ray, MaterialBRDF material, uint currentBounce, float
     float lightPDF, float3 radianceLi, Light selectedLight, inout RadianceT radiance, inout StratifiedSampler randomStratified)
 {
 #if defined(DISABLE_NON_NEE) || (defined(DISABLE_AREA_LIGHTS) && defined(DISABLE_ENVIRONMENT_LIGHTS))
-    float pdf;
-    float3 sampleReflectance = evaluateBRDF(material, normal, viewDirection, ray.direction, randomStratified, pdf);
+    float3 sampleReflectance = evaluateBRDF(material, normal, viewDirection, ray.direction, randomStratified);
     addRadiance(radiance, throughput * sampleReflectance * radianceLi / lightPDF, currentBounce);
 #else
     // Evaluate BRDF for new light direction and calculate PDF for current sample

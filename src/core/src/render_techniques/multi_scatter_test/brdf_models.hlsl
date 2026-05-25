@@ -12,7 +12,7 @@
 #define INV_2_SQRT_M_PI	0.28209479177387814347f /* 0.5/sqrt(pi) */
 #define INV_SQRT_2_M_PI 0.3989422804014326779f /* 1/sqrt(2*pi) */
 #define INV_SQRT_2		0.7071067811865475244f /* 1/sqrt(2) */
-static const int MS_MAX_STEPS = 64;
+static const int MS_MAX_STEPS = 1024;
 
 float SchlickGGX(float NdotV, float NdotL, float rough)
 {
@@ -98,8 +98,7 @@ BRDFLobes CookTorrance(float3 N, float3 V, float3 L, MaterialBRDF material)
     r.specularSingleShape = ((D * G ) / (4.0 * NdotL * NdotV + 1e-5));
 
     // --- Diffuse (energy conserving) ---
-    float3 kd = (1.0f.xxx - F) * 1.05 * (1.0f - pow(1.0f - saturate(abs(VdotH)), 5.0f));
-    r.diffuseShape = kd.r * INV_PI;
+    r.diffuseShape = INV_PI;
 
     r.specularMultiShape = 0.0f; // no MS in this model
     r.F0Rgb = f0;
@@ -160,8 +159,7 @@ BRDFLobes FastMSX(float3 N, float3 V, float3 L, MaterialBRDF material)
     r.specularMultiShape = (DI * GI) / (2.0 * max(1e-4, CosVC));
 
     // --- Diffuse (energy conserving) ---
-    float3 kd = (1.0f.xxx - F) * 1.05 * (1.0f - pow(1.0f - saturate(abs(VdotH)), 5.0f));
-    r.diffuseShape = kd.r * INV_PI;
+    r.diffuseShape = INV_PI;
     r.F0Rgb = f0;
     return r;
 }
@@ -372,6 +370,33 @@ float slopeBeckmannProjectedArea(float3 wi, float alphaX, float alphaY)
         INV_2_SQRT_M_PI * alphaI * sin(thetaI) * exp(-a * a);
 
     return value;
+}
+
+float slopeBeckmannProjectedAreaIso(float3 wi, float alphaX, float alphaY)
+{
+    float sinTheta = sqrt(max(0.0f, 1.0f - wi.z * wi.z));
+    float cosTheta = wi.z;
+
+    if (sinTheta < 1e-6f)
+        return 1.0f; // normal incidence
+
+    float alpha = alphaX; // isotropic
+    float a = cosTheta / (alpha * sinTheta);
+
+    // Stable erf(a)
+    float erfA;
+    if (a > 10.0f)
+        erfA = 1.0f;
+    else if (a < -10.0f)
+        erfA = -1.0f;
+    else
+        erfA = erfApprox(a);
+
+    // Stable exp(-a*a)
+    float expTerm = (abs(a) > 10.0f) ? 0.0f : exp(-a * a);
+
+    return 0.5f * (erfA + 1.0f) * cosTheta +
+           0.5f * INV_SQRT_M_PI * alpha * sinTheta * expTerm;
 }
 
 float2 slopeBeckmannSampleP22_11(float thetaI, float u, float u2)
@@ -610,7 +635,7 @@ float slopeDwi(float3 wi, float3 wm, float alphaX, float alphaY, int ndfType)
 
         float D = slopeGGX_P22(-wm.x / wm.z, -wm.y / wm.z, alphaX, alphaY) / (wm.z * wm.z * wm.z);
         float G1 = microsurfaceG1(wi, alphaX, alphaY, NDF_GGX);
-
+        G1 = max(G1, 1e-6f);
         float denom = max(1e-6f, wi.z);
         return D * G1 * wiDotWh / denom;
     }
@@ -628,8 +653,8 @@ float slopeDwi(float3 wi, float3 wm, float alphaX, float alphaY, int ndfType)
             break;
 
     }
-    if (projectedArea == 0.0f)
-        return 0.0f;
+    if (projectedArea == 0)
+        return 0;
 
     float c = 1.0f / projectedArea;
 
@@ -742,11 +767,8 @@ float RandomGamma(inout RNG rng, float a)
     }
 
     float d = a - 1.0f / 3.0f;
-    if (!isfinite(d) || d <= 0.0f)
-        return 0.0f;
     float c = 1.0f / sqrt(9.0f * d);
-    if (!isfinite(c))
-        return 0.0f;
+    
 
     for (int i = 0; i < 64; i++)
     {
@@ -813,8 +835,6 @@ float sampleMPrime(float u, float gamma, inout RNG rng)
             return 0.0f;
 
         float g = RandomGamma(rng, a);
-        if (!isfinite(g) || g <= 0.0f)
-            return 0.0f;
 
         float res = pow(g, 1.0f / c) * b;
         return isfinite(res) ? res : 0.0f;
@@ -831,8 +851,6 @@ float sampleMPrime(float u, float gamma, inout RNG rng)
         return 0.0f;
 
     float gammaWidth = 1.0f / (1.0f - u * u / denom);
-    if (!isfinite(gammaWidth))
-        return 0.0f;
 
     if (xi1 < p1)
     {
@@ -841,35 +859,31 @@ float sampleMPrime(float u, float gamma, inout RNG rng)
         float res = g * gammaWidth;
         return isfinite(res) ? res : 0.0f;
     }
-    else if (xi1 < p1 + p2)
+    if (xi1 < p1 + p2)
     {
         float g = RandomGamma(rng, gamma - 1.0f);
         return isfinite(g) ? g : 0.0f;
     }
-    else
-    {
+    
+    
             // term 3
-        float m = RandomGamma(rng, gamma - 1.0);
+    float m = RandomGamma(rng, gamma - 1.0);
+    for (int iter = 0; iter < 64; ++iter)
+    {
+        float arg = u * sqrt(-(m / ((-1.0f + gamma) * (-1.0f + u * u))));
+        float acc = erfApprox(arg);
+        if (!isfinite(acc))
+            break;
+        float r = rng.rand();
+        if (r <= acc)
+            return isfinite(m) ? m : 0.0f;
+        m = RandomGamma(rng, gamma - 1.0f);
         if (!isfinite(m))
-            return 0.0f;
-        for (int iter = 0; iter < 64; ++iter)
-        {
-            float arg = u * sqrt(-(m / ((-1.0f + gamma) * (-1.0f + u * u))));
-            if (!isfinite(arg))
-                break;
-            float acc = erfApprox(arg);
-            if (!isfinite(acc))
-                break;
-            float r = rng.rand();
-            if (r <= acc)
-                return isfinite(m) ? m : 0.0f;
-            m = RandomGamma(rng, gamma - 1.0f);
-            if (!isfinite(m))
-                break;
-        }
-        return m;
-        
+            break;
     }
+    return m;
+        
+    
 
 }
 
@@ -895,7 +909,6 @@ float3 slopeStudentT_SampleDwi(float3 wi, float u1, float u2, float alphaX, floa
     if (!isfinite(ax) || !isfinite(ay) || ax <= 0.0f || ay <= 0.0f)
         return slopeBeckmannSampleDwi(wi, u1, u2, alphaX, alphaY);
 
-    // reuse your existing Beckmann visible-normal sampler:
     return slopeBeckmannSampleDwi(wi, u1, u2, ax, ay);
 }
 
@@ -1024,9 +1037,16 @@ float dielectricFresnel(float3 wi, float3 wm, float eta)
     return 0.5f * (Rs * Rs + Rp * Rp);
 }
 
-float dielectricEvalPhaseFunctionCore(float3 wi, float3 wo, bool wiOutside, bool woOutside, float alphaX, float alphaY, int ndfType, float eta)
+float dielectricEvalPhaseFunctionCore(float3 wi, float3 wo, bool wiOutside, bool woOutside, float alphaX, float alphaY, int ndfType, float eta, bool allowTransmission)
 {
+
     float etaLocal = wiOutside ? eta : 1.0f / eta;
+
+    if (!allowTransmission)
+    {
+        woOutside = wiOutside;
+        etaLocal = eta;
+    }
 
     if (wiOutside == woOutside)
     {
@@ -1043,55 +1063,61 @@ float dielectricEvalPhaseFunctionCore(float3 wi, float3 wo, bool wiOutside, bool
 
         return 0.25f * Dwi / dot(wi, wh) * F;
     }
+    
+    float3 wh = -normalize(wi + wo * etaLocal);
+    wh *= wiOutside ? sign(wh.z) : -sign(wh.z);
+
+    if (dot(wh, wi) < 0.0f)
+        return 0.0f;
+
+    float value;
+    if (wiOutside)
+    {
+        float F = dielectricFresnel(wi, wh, etaLocal);
+        float Dwi = slopeDwi(wi, wh, alphaX, alphaY, ndfType);
+
+        value = etaLocal * etaLocal * (1.0f - F) *
+                Dwi * max(0.0f, -dot(wo, wh)) *
+                1.0f / pow(dot(wi, wh) + etaLocal * dot(wo, wh), 2.0f);
+    }
     else
     {
-        float3 wh = -normalize(wi + wo * etaLocal);
-        wh *= wiOutside ? sign(wh.z) : -sign(wh.z);
+        wi = -wi;
+        wo = -wo;
+        wh = -wh;
 
-        if (dot(wh, wi) < 0.0f)
-            return 0.0f;
+        float F = dielectricFresnel(wi, wh, etaLocal);
+        float Dwi = slopeDwi(wi, wh, alphaX, alphaY, ndfType);
 
-        float value;
-        if (wiOutside)
-        {
-            float F = dielectricFresnel(wi, wh, etaLocal);
-            float Dwi = slopeDwi(wi, wh, alphaX, alphaY, ndfType);
-
-            value = etaLocal * etaLocal * (1.0f - F) *
-                    Dwi * max(0.0f, -dot(wo, wh)) *
-                    1.0f / pow(dot(wi, wh) + etaLocal * dot(wo, wh), 2.0f);
-        }
-        else
-        {
-            wi = -wi;
-            wo = -wo;
-            wh = -wh;
-
-            float F = dielectricFresnel(wi, wh, etaLocal);
-            float Dwi = slopeDwi(wi, wh, alphaX, alphaY, ndfType);
-
-            value = etaLocal * etaLocal * (1.0f - F) *
-                    Dwi * max(0.0f, -dot(wo, wh)) *
-                    1.0f / pow(dot(wi, wh) + etaLocal * dot(wo, wh), 2.0f);
-        }
-
-        return value;
+        value = etaLocal * etaLocal * (1.0f - F) *
+                Dwi * max(0.0f, -dot(wo, wh)) *
+                1.0f / pow(dot(wi, wh) + etaLocal * dot(wo, wh), 2.0f);
     }
+
+    return value;
 }
 
-float dielectricEvalPhaseFunction(float3 wi, float3 wo, float alphaX, float alphaY, int ndfType, float eta)
+
+float dielectricEvalPhaseFunction(float3 wi, float3 wo, float alphaX, float alphaY, int ndfType, float eta, bool allowTransmission)
 {
-    return dielectricEvalPhaseFunctionCore(wi, wo, true, true, alphaX, alphaY, ndfType, eta)
+    return dielectricEvalPhaseFunctionCore(wi, wo, true, true, alphaX, alphaY, ndfType, eta, allowTransmission)
            +
-           dielectricEvalPhaseFunctionCore(wi, wo, true, false, alphaX, alphaY, ndfType, eta);
+           dielectricEvalPhaseFunctionCore(wi, wo, true, false, alphaX, alphaY, ndfType, eta, allowTransmission);
 }
+
 template<typename RNG>
-float3 dielectricSamplePhaseFunction(float3 wi, inout RNG rng, bool wiOutside, out bool woOutside, float alphaX, float alphaY, int ndfType, float eta)
+float3 dielectricSamplePhaseFunction(float3 wi, inout RNG rng, bool wiOutside, out bool woOutside, float alphaX, float alphaY, int ndfType, float eta, bool allowTransmission)
 {
     float u1 = rng.rand();
     float u2 = rng.rand();
     float u3 = rng.rand(); // for Fresnel branch
     float etaLocal = wiOutside ? eta : 1.0f / eta;
+    if (!allowTransmission)
+    {
+        woOutside = wiOutside;
+        etaLocal = eta;
+        u3 = 0.0f;
+    }
 
     float3 wm;
     if (wiOutside)
@@ -1139,18 +1165,19 @@ float3 dielectricSamplePhaseFunction(float3 wi, inout RNG rng, bool wiOutside, o
         woOutside = wiOutside;
         return wo;
     }
-    else
-    {
-        woOutside = !wiOutside;
-        float3 wo = dielectricRefract(wi, wm, etaLocal);
-        return normalize(wo);
-    }
+    
+    
+    woOutside = !wiOutside;
+    float3 wo = dielectricRefract(wi, wm, etaLocal);
+    return normalize(wo);
+    
 }
 
-float dielectricEvalSingleScattering(float3 wi, float3 wo, float alphaX, float alphaY, int ndfType, float eta)
+float dielectricEvalSingleScattering(float3 wi, float3 wo, float alphaX, float alphaY, int ndfType, float eta, bool allowTransmission)
 {
     bool woOutside = (wo.z > 0.0f);
-    bool wiOutside = true;
+    if (!allowTransmission)
+        woOutside = true;
 
     if (woOutside)
     {
@@ -1164,28 +1191,27 @@ float dielectricEvalSingleScattering(float3 wi, float3 wo, float alphaX, float a
         float F = dielectricFresnel(wi, wh, eta);
         return F * D * G2 / (4.0f * wi.z);
     }
-    else
-    {
-        float3 wh = -normalize(wi + wo * eta);
-        if (eta < 1.0f)
-            wh = -wh;
+    
+    float3 wh = -normalize(wi + wo * eta);
+    if (eta < 1.0f)
+        wh = -wh;
 
-        float D = slopeD(wh, alphaX, alphaY, ndfType);
+    float D = slopeD(wh, alphaX, alphaY, ndfType);
 
-        float LambdaI = slopeLambda(wi, alphaX, alphaY, ndfType);
-        float LambdaO = slopeLambda(-wo, alphaX, alphaY, ndfType);
+    float LambdaI = slopeLambda(wi, alphaX, alphaY, ndfType);
+    float LambdaO = slopeLambda(-wo, alphaX, alphaY, ndfType);
 
-        float G2 = betaFunc(1.0f + LambdaI, 1.0f + LambdaO);
+    float G2 = betaFunc(1.0f + LambdaI, 1.0f + LambdaO);
 
-        float F = dielectricFresnel(wi, wh, eta);
+    float F = dielectricFresnel(wi, wh, eta);
 
-        float value =
-            max(0.0f, dot(wi, wh)) * max(0.0f, -dot(wo, wh)) *
-            (1.0f / wi.z) * eta * eta * (1.0f - F) *
-            G2 * D / pow(dot(wi, wh) + eta * dot(wo, wh), 2.0f);
+    float value =
+        max(0.0f, dot(wi, wh)) * max(0.0f, -dot(wo, wh)) *
+        (1.0f / wi.z) * eta * eta * (1.0f - F) *
+        G2 * D / pow(dot(wi, wh) + eta * dot(wo, wh), 2.0f);
 
-        return value;
-    }
+    return value;
+    
 }
 
 void buildOrthonormalBasis(out float3 omega1, out float3 omega2, float3 omega3)
@@ -1229,6 +1255,7 @@ float diffuseEvalPhaseFunction(float3 wi, float3 wo, float2 u, float alphaX, flo
     }
     return INV_M_PI * max(0.0f, dot(wo, wm));
 }
+
 
 template<typename RNG>
 float3 diffuseSamplePhaseFunction(float3 wi, float4 u, float alphaX, float alphaY, int ndfType, inout RNG rng)
@@ -1319,7 +1346,7 @@ float diffuseEvalSingleScattering(float3 wi, float3 wo, float2 u, float alphaX, 
 
 
 template<typename RNG>
-float dielectricEval(float3 wi, float3 wo, int scatteringOrder, bool heightUniform, float alphaX, float alphaY, int ndfType, float ior, inout RNG rng)
+float dielectricEval(float3 wi, float3 wo, int scatteringOrder, bool heightUniform, float alphaX, float alphaY, int ndfType, float ior, inout RNG rng, bool allowTransmission)
 {
     // Only outgoing directions above the surface contribute
     if (wo.z < 0.0f)
@@ -1358,7 +1385,7 @@ float dielectricEval(float3 wi, float3 wo, int scatteringOrder, bool heightUnifo
         currentOrder++;
 
         // --- Next-event estimation ---
-        float phase = dielectricEvalPhaseFunctionCore(-wr, wo, outside, (wo.z > 0.0f), alphaX, alphaY, ndfType, ior);
+        float phase = dielectricEvalPhaseFunctionCore(-wr, wo, outside, (wo.z > 0.0f), alphaX, alphaY, ndfType, ior, allowTransmission);
 
         float shadow = (wo.z > 0.0f)
             ? microsurfaceG1Height(wo, hr, heightUniform, alphaX, alphaY, ndfType)
@@ -1375,8 +1402,10 @@ float dielectricEval(float3 wi, float3 wo, int scatteringOrder, bool heightUnifo
             }
         }
 
+        
         // --- Sample next direction ---
-        float3 newWr = dielectricSamplePhaseFunction(-wr, rng, outside, outside, alphaX, alphaY, ndfType, ior);
+        bool woOutside;
+        float3 newWr = dielectricSamplePhaseFunction(-wr, rng, outside, woOutside, alphaX, alphaY, ndfType, ior, allowTransmission);
 
         // Safety: NaN check
         if (!isfinite(hr) || !isfinite(newWr.z))
@@ -1385,14 +1414,14 @@ float dielectricEval(float3 wi, float3 wo, int scatteringOrder, bool heightUnifo
         wr = newWr;
 
         // Update inside/outside state for dielectric
-        outside = (wr.z > 0.0f);
+        outside = woOutside;
     }
 
     return sum;
 }
 
 template<typename RNG>
-float3 dielectricSample( float3 wi, out int scatteringOrder, bool heightUniform, float alphaX, float alphaY, int ndfType, float ior, inout RNG rng)
+float3 dielectricSample(float3 wi, out int scatteringOrder, bool heightUniform, float alphaX, float alphaY, int ndfType, float ior, inout RNG rng, bool allowTransmission, out float pdf)
 {
     // Initial direction inside the microsurface
     float3 wr = -wi;
@@ -1423,7 +1452,8 @@ float3 dielectricSample( float3 wi, out int scatteringOrder, bool heightUniform,
         scatteringOrder++;
 
         // --- Sample next direction ---
-        float3 newWr = dielectricSamplePhaseFunction( -wr, rng, outside,  outside, alphaX, alphaY, ndfType, ior);
+        bool woOutside;
+        float3 newWr = dielectricSamplePhaseFunction(-wr, rng, outside, woOutside, alphaX, alphaY, ndfType, ior, allowTransmission);
 
         // Safety: NaN check
         if (!isfinite(hr) || !isfinite(newWr.z))
@@ -1432,8 +1462,15 @@ float3 dielectricSample( float3 wi, out int scatteringOrder, bool heightUniform,
         wr = newWr;
 
         // Update inside/outside state
-        outside = (wr.z > 0.0f);
+        outside = woOutside;
     }
+
+    float3 wo = wr;
+
+    bool wiOutside = (wi.z > 0);
+    bool woOutside = (wo.z > 0);
+
+    pdf = dielectricEvalPhaseFunctionCore( wi, wo, wiOutside, woOutside, alphaX, alphaY, ndfType, ior, allowTransmission);
 
     return wr;
 }
@@ -1472,8 +1509,8 @@ float microsurfaceEval(MaterialBRDF material, float3 wi, float3 wo, int scatteri
     if (wo.z < 0.0f)
         return 0.0f;
 
-    bool isDielectric = (material.transmission > 0.0f);
-    bool isConductor = !isDielectric && (material.metallicity > 0.5f);
+    bool isConductor = (material.metallicity >= 1.0f);
+   
     // Initial direction inside the microsurface
     float3 wr = -wi;
 
@@ -1521,13 +1558,95 @@ float microsurfaceEval(MaterialBRDF material, float3 wi, float3 wo, int scatteri
     return sum;
 }
 
+float slopeBeckmannPdfDwi(float3 wi, float3 wm, float ax, float ay)
+{
+    if (wm.z <= 0.0f)
+        return 0.0f;
+
+    // Beckmann NDF
+    float tan2 = (wm.x * wm.x) / (ax * ax) + (wm.y * wm.y) / (ay * ay);
+    float cos4 = wm.z * wm.z * wm.z * wm.z;
+    float D = exp(-tan2) / (PI * ax * ay * cos4);
+
+    // Smith G1 for VNDF
+    float G1 = microsurfaceG1(wi, ax, ay, NDF_Beckmann);
+
+    // VNDF pdf
+    return D * G1 * abs(dot(wi, wm)) / abs(wi.z);
+}
+float GGX_VNDF_PdfDwi(float3 wi, float3 wm, float ax, float ay)
+{
+    if (wm.z <= 0.0f)
+        return 0.0f;
+
+    float tan2 = (wm.x * wm.x) / (ax * ax) + (wm.y * wm.y) / (ay * ay);
+    float cos4 = wm.z * wm.z * wm.z * wm.z;
+    float D = 1.0f / (PI * ax * ay * cos4 * (1.0f + tan2) * (1.0f + tan2));
+
+    float G1 = microsurfaceG1(wi, ax, ay, NDF_GGX);
+
+    return D * G1 * abs(dot(wi, wm)) / abs(wi.z);
+}
+
+float studentT_VNDF_PdfDwi(float3 wi, float3 wm, float alphaX, float alphaY)
+{
+    float gamma = deriveGammaFromAlpha(alphaX);
+
+    float cosTheta = wm.z;
+    if (cosTheta <= 0.0f)
+        return 0.0f;
+
+    // Reconstruct m'
+    float m_prime = (gamma - 1.0f) / max(1e-6, cosTheta * cosTheta);
+
+    float beckRough = 1.0f / sqrt(max(1e-6, m_prime / (gamma - 1.0f)));
+    float ax = beckRough * alphaX;
+    float ay = beckRough * alphaY;
+
+    return slopeBeckmannPdfDwi(wi, wm, ax, ay);
+}
+
+float cosineHemispherePdf(float3 wo, float3 wm)
+{
+    float c = dot(wo, wm);
+    return c > 0.0f ? c * INV_PI : 0.0f;
+}
+
+float diffusePhaseFunctionPdf(float3 wi, float3 wo, float alphaX, float alphaY, int ndfType)
+{
+    float3 wm = normalize(wi + wo);
+    if (wm.z <= 0.0f)
+        return 0.0f;
+
+    float p_wm;
+
+    switch (ndfType)
+    {
+        case NDF_StudentT:
+            p_wm = studentT_VNDF_PdfDwi(wi, wm, alphaX, alphaY);
+            break;
+
+        case NDF_GGX:
+            p_wm = GGX_VNDF_PdfDwi(wi, wm, alphaX, alphaY);
+            break;
+
+        case NDF_Beckmann:
+        default:
+            p_wm = slopeBeckmannPdfDwi(wi, wm, alphaX, alphaY);
+            break;
+    }
+
+    float p_local = cosineHemispherePdf(wo, wm);
+
+    return p_wm * p_local;
+}
+
 template<typename RNG>
-float3 microsurfaceSample(MaterialBRDF material, float3 wi, out int scatteringOrder, bool heightUniform, float alphaX, float alphaY, int ndfType, inout RNG randomNG)
+float3 microsurfaceSample(MaterialBRDF material, float3 wi, out int scatteringOrder, bool heightUniform, float alphaX, float alphaY, int ndfType, inout RNG randomNG, out float pdf)
 {
     // init
     float3 wr = -wi;
-    bool isDielectric = (material.transmission > 0.0f);
-    bool isConductor = !isDielectric && (material.metallicity > 0.5f);
+    bool isConductor = (material.metallicity >= 1.0f);
 
 
     // initial height (same as C++)
@@ -1556,10 +1675,20 @@ float3 microsurfaceSample(MaterialBRDF material, float3 wi, out int scatteringOr
             return float3(0, 0, 1);
     }
 
+    float3 wo = wr;
+
+    if (isConductor)
+    {
+        pdf = conductorEvalPhaseFunction( wi, wo, alphaX, alphaY, ndfType);
+    } else
+    {
+        pdf = diffusePhaseFunctionPdf(wi, wo, alphaX, alphaY, ndfType);
+    }
+
     return wr;
 }
 
-
+                              /*
 float Luminance(float3 c)
 {
     return dot(c, float3(0.2126, 0.7152, 0.0722));
@@ -1583,7 +1712,7 @@ void buildTangentFrame(float3 N, out float3 T, out float3 B)
 float3 toLocal(float3 v, float3 T, float3 B, float3 N)
 {
     return float3(dot(v, T), dot(v, B), dot(v, N));
-}
+}*/
 
 template<typename RNG>
 BRDFLobes Heitz(float3 N, float3 V, float3 L, MaterialBRDF material, inout RNG rng)
@@ -1604,8 +1733,9 @@ BRDFLobes Heitz(float3 N, float3 V, float3 L, MaterialBRDF material, inout RNG r
 
     float alphaX = material.roughnessAlpha;
     float alphaY = alphaX;
-    bool isDielectric = (material.transmission > 0.0f);
-    bool isConductor = !isDielectric && (material.metallicity > 0.5f);
+    bool isConductor = (material.metallicity >= 1.0f);
+    bool isDielectric = !isConductor;
+    bool isTransmissive = (material.transmission > 0.0f);
     int ndfType;
         
     switch (material.brdfType)
@@ -1627,31 +1757,46 @@ BRDFLobes Heitz(float3 N, float3 V, float3 L, MaterialBRDF material, inout RNG r
                 break;
             }
     }
-    if (isConductor)
+    bool heightUniform = true;
+    if (isTransmissive)
     {
-        r.specularSingleShape = conductorEvalSingleScattering(V, L, alphaX, alphaY, ndfType);
-        r.specularMultiShape = microsurfaceEval(material, V, L, 0, true, alphaX, alphaY, ndfType, rng);
+        
+        r.diffuseShape = 0.0;
+        r.F0Rgb = 1;
+        float shape = dielectricEval(V, L, 0, heightUniform, alphaX, alphaY, ndfType, material.ior, rng, true);
+        r.specularSingleShape = 0; // dielectricEvalSingleScattering(V, L, alphaX, alphaY, ndfType, material.ior, true);
+        r.specularMultiShape = shape; //transmission shape
+        
 
+    }
+    else if (isConductor)
+    {
+        r.diffuseShape = 0.0;
+        r.F0Rgb = material.F0;
+        r.specularSingleShape = 0; // conductorEvalSingleScattering(V, L, alphaX, alphaY, ndfType);;
+        r.specularMultiShape = microsurfaceEval(material, V, L, 0, heightUniform, alphaX, alphaY, ndfType, rng);
     }
     else if (isDielectric)
     {
-        r.specularSingleShape = dielectricEvalSingleScattering(V, L, alphaX, alphaY, ndfType, material.ior);
-        r.specularMultiShape = dielectricEval(V, L, 0, true, alphaX, alphaY, ndfType, material.ior, rng);
-
+        r.diffuseShape = INV_PI;
+        r.F0Rgb = 1;
+        r.specularSingleShape = 0; // dielectricEvalSingleScattering(V, L, alphaX, alphaY, ndfType, material.ior, false);
+        r.specularMultiShape = dielectricEval(V, L, 0, heightUniform, alphaX, alphaY, ndfType, material.ior, rng, false);
     }
     else
     {
-       
         float2 u = float2(0.5, 0.5); 
-        r.specularSingleShape = diffuseEvalSingleScattering(V, L, u, alphaX, alphaY, ndfType, rng);
-        r.specularMultiShape = microsurfaceEval(material, V, L, 0, true, alphaX, alphaY, ndfType, rng);
-
+        r.diffuseShape = INV_PI;
+        r.F0Rgb = material.F0;
+        r.specularSingleShape = 0; //diffuseEvalSingleScattering(V, L, u, alphaX, alphaY, ndfType, rng);
+        r.specularMultiShape = microsurfaceEval(material, V, L, 0, heightUniform, alphaX, alphaY, ndfType, rng);
     }
     
 
-    r.F0Rgb = material.F0;
+    
 
-    r.diffuseShape =  INV_PI;
+    
+
 
     return r;
 }

@@ -154,7 +154,7 @@ float4 main(float4 pos : SV_Position) : SV_Target0
         float3 radiance = evaluateLight(light, worldPos, L);
         
         float pdf;
-        float3 f = evaluateBRDF(brdf, N, V, L, randomStratified, pdf);
+        float3 f = evaluateBRDF(brdf, N, V, L, randomStratified);
         
         totalLighting += f * radiance * NdotL;
     }

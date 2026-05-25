@@ -193,7 +193,7 @@ float3 sampleGGX(float roughnessAlpha, float3 localView, float2 samples)
 }
 
 template<typename RNG>
-float3 sampleSpecularDirection(MaterialBRDF material, float3 localView, float2 samples, inout RNG randomNG)
+float3 sampleSpecularDirection(MaterialBRDF material, float3 localView, float2 samples, inout RNG randomNG, out float pdf)
 {
     switch (material.brdfType)
     {
@@ -201,33 +201,61 @@ float3 sampleSpecularDirection(MaterialBRDF material, float3 localView, float2 s
                 float scatteringOrder;
                 float alphaX = material.roughnessAlpha;
                 float alphaY = alphaX;
-                bool isDielectric = (material.transmission > 0.0f);
-                return isDielectric 
-                ? dielectricSample(localView, scatteringOrder, true, alphaX, alphaY, 2, material.ior, randomNG) 
-                : microsurfaceSample(material, localView, scatteringOrder, true, alphaX, alphaY, 2, randomNG);
+                bool isConductor = (material.metallicity >= 1.0f);
+                bool isTransmissive = (material.transmission > 0.0f);
+                bool isDielectric = !isConductor && !isTransmissive;
+                bool heightUniform = false;
+                int ndf = 2;
+                if (isTransmissive)
+                    return dielectricSample(localView, scatteringOrder, heightUniform, alphaX, alphaY, ndf, material.ior, randomNG, true, pdf); //   dielectric transmission
+                if (isConductor)
+                    return microsurfaceSample(material, localView, scatteringOrder, heightUniform, alphaX, alphaY, ndf, randomNG, pdf); // conductive
+                if (isDielectric)
+                    return dielectricSample(localView, scatteringOrder, heightUniform, alphaX, alphaY, ndf, material.ior, randomNG, false, pdf); // dielectric reflection
+
+                return microsurfaceSample(material, localView, scatteringOrder, heightUniform, alphaX, alphaY, ndf, randomNG, pdf); // diffuse
             }
         case BRDF_Heitz_GGX:{
                 float scatteringOrder;
                 float alphaX = material.roughnessAlpha;
                 float alphaY = alphaX;
-                bool isDielectric = (material.transmission > 0.0f);
-                return isDielectric
-            ? dielectricSample(localView, scatteringOrder, true, alphaX, alphaY, 1, material.ior, randomNG)
-            : microsurfaceSample(material, localView, scatteringOrder, true, alphaX, alphaY, 1, randomNG);
+                bool isConductor = (material.metallicity >= 1.0f);
+                bool isTransmissive = (material.transmission > 0.0f);
+                bool isDielectric = !isConductor && !isTransmissive;
+                bool heightUniform = false;
+                int ndf = 1;
+                if (isTransmissive)
+                    return dielectricSample(localView, scatteringOrder, heightUniform, alphaX, alphaY, ndf, material.ior, randomNG, true, pdf); //   dielectric transmission
+                if (isConductor)
+                    return microsurfaceSample(material, localView, scatteringOrder, heightUniform, alphaX, alphaY, ndf, randomNG, pdf); // conductive
+                if (isDielectric)
+                    return dielectricSample(localView, scatteringOrder, heightUniform, alphaX, alphaY, ndf, material.ior, randomNG, false, pdf); // dielectric reflection
+
+                return microsurfaceSample(material, localView, scatteringOrder, heightUniform, alphaX, alphaY, ndf, randomNG, pdf); // diffuse
             }
         case BRDF_Heitz_Beckmann:{
                 float scatteringOrder;
                 float alphaX = material.roughnessAlpha;
                 float alphaY = alphaX;
-                bool isDielectric = (material.transmission > 0.0f);
-                return isDielectric
-            ? dielectricSample(localView, scatteringOrder, true, alphaX, alphaY, 0, material.ior, randomNG)
-            : microsurfaceSample(material, localView, scatteringOrder, true, alphaX, alphaY, 0, randomNG);
+                bool isConductor = (material.metallicity >= 1.0f);
+                bool isTransmissive = (material.transmission > 0.0f);
+                bool isDielectric = !isConductor && !isTransmissive;
+                bool heightUniform = false;
+                int ndf = 0;
+                if (isTransmissive)
+                    return dielectricSample(localView, scatteringOrder, heightUniform, alphaX, alphaY, ndf, material.ior, randomNG, true, pdf); //   dielectric transmission
+                if (isConductor)
+                    return microsurfaceSample(material, localView, scatteringOrder, heightUniform, alphaX, alphaY, ndf, randomNG, pdf); // conductive
+                if (isDielectric)
+                    return dielectricSample(localView, scatteringOrder, heightUniform, alphaX, alphaY, ndf, material.ior, randomNG, false, pdf); // dielectric reflection
+
+                return microsurfaceSample(material, localView, scatteringOrder, heightUniform, alphaX, alphaY, ndf, randomNG, pdf); // diffuse
             }        
         case BRDF_GGX:
         case BRDF_CookTorr:
         case BRDF_FastMSX:
         default:
+            pdf = 0;
             return sampleGGX(material.roughnessAlpha, localView, samples);
     }
 }
@@ -514,7 +542,9 @@ float sampleBRDFPDFAndEvalute(MaterialBRDF material, float3 normal, float3 viewD
     float dotNH = clamp(halfVector.z, -1.0f, 1.0f);
     float dotNV = clamp(localView.z, -1.0f, 1.0f);
     float samplePDF;
-    reflectance = evaluateBRDF(material, float3(0, 0, 1), localView, newLight, rng, samplePDF);
+    float2 samples = rng.rand2();
+    sampleSpecularDirection(material, localView, samples, rng, samplePDF);
+    reflectance = evaluateBRDF(material, float3(0, 0, 1), localView, newLight, rng);
     if (samplePDF == 0.0f)
     {
                                                // Must use specular direction for H.V to match sampling functions
@@ -623,10 +653,11 @@ float3 sampleBRDFAndEvaluateType(MaterialBRDF material, inout RNG randomNG, floa
     float specularDotHV = saturate(dot(specularHalfVector, localView));
     float probabilityBRDF = calculateBRDFProbability(material.F0, specularDotHV, material.albedo);
     specularSampled = false;
+    float3 specularDirection = sampleSpecularDirection(material, localView, samples, randomNG, pdf);
     if (randomNG.rand() < probabilityBRDF)
     {
         // Sample specular BRDF component
-        newLight = sampleSpecularDirection(material, localView, samples, randomNG);
+        newLight = specularDirection;
         specularSampled = true;
     }
     else
@@ -649,7 +680,7 @@ float3 sampleBRDFAndEvaluateType(MaterialBRDF material, inout RNG randomNG, floa
 #ifndef DISABLE_SPECULAR_MATERIALS
     float dotNH = clamp(halfVector.z, -1.0f, 1.0f);
     float dotNV = clamp(localView.z, -1.0f, 1.0f);
-    reflectance = evaluateBRDF(material, float3(0,0,1), localView, newLight, randomNG, pdf);
+    reflectance = evaluateBRDF(material, float3(0,0,1), localView, newLight, randomNG);
 #else
     reflectance = evaluateBRDFDiffuse(material, dotHV, dotNL);
 #endif
@@ -716,10 +747,11 @@ float3 sampleBRDFType(MaterialBRDF material, inout RNG randomNG, float3 normal, 
     float specularDotHV = saturate(dot(specularHalfVector, localView));
     float probabilityBRDF = calculateBRDFProbability(material.F0, specularDotHV, material.albedo);
     specularSampled = (randomNG.rand() < probabilityBRDF ? true : false);
+    float3 specularDirection = sampleSpecularDirection(material, localView, samples, randomNG, pdf);
     if (specularSampled)
     {
         // Sample specular BRDF component
-        newLight = sampleSpecularDirection(material, localView, samples, randomNG);
+        newLight = specularDirection;
     }
     else
     {
@@ -741,7 +773,8 @@ float3 sampleBRDFType(MaterialBRDF material, inout RNG randomNG, float3 normal, 
 #ifndef DISABLE_SPECULAR_MATERIALS
     float dotNH = clamp(halfVector.z, -1.0f, 1.0f);
     float dotNV = clamp(localView.z, -1.0f, 1.0f);
-    pdf = sampleBRDFPDF2(material, dotNH, dotNL, dotNV, probabilityBRDF, localView, halfVector);
+    if (pdf==0)
+        pdf = sampleBRDFPDF2(material, dotNH, dotNL, dotNV, probabilityBRDF, localView, halfVector);
 #else
     pdf = sampleLambertPDF(dotNL);
 #endif
@@ -791,8 +824,10 @@ float sampleBRDFPDFAndEvaluateDiffuse(MaterialBRDF material, float3 normal, floa
     // Calculate shading angles
     float dotHV = saturate(dot(halfVector, viewDirection));
     float samplePDF;
+    float2 samples = rng.rand2();
+    sampleSpecularDirection(material, viewDirection, samples, rng, samplePDF);
 #ifndef DISABLE_SPECULAR_MATERIALS
-    reflectance = evaluateBRDF(material, normal, viewDirection, lightDirection, rng, samplePDF);
+    reflectance = evaluateBRDF(material, normal, viewDirection, lightDirection, rng);
     if (samplePDF > 0.0f)
         return samplePDF;
 #else
@@ -837,7 +872,8 @@ float3 sampleBRDFAndEvaluateDiffuse(MaterialBRDF material, inout RNG randomNG, f
 #ifndef DISABLE_SPECULAR_MATERIALS
     float dotNH = clamp(halfVector.z, -1.0f, 1.0f);
     float dotNV = clamp(localView.z, -1.0f, 1.0f);
-    reflectance = evaluateBRDF(material, float3(0,0,1), localView, newLight, randomNG, pdf);
+    sampleSpecularDirection(material, localView, samples, randomNG, pdf);
+    reflectance = evaluateBRDF(material, float3(0,0,1), localView, newLight, randomNG);
 #else
     pdf = 0.0f;
     reflectance = evaluateBRDFDiffuse(material, dotHV, dotNL);
@@ -915,7 +951,9 @@ float sampleBRDFPDFAndEvaluateSpecular(MaterialBRDF material, float3 normal, flo
     float dotNH = clamp(halfVector.z, -1.0f, 1.0f);
     float dotNV = clamp(localView.z, -1.0f, 1.0f);
     float samplePDF;
-    reflectance = evaluateBRDF(material, normal, viewDirection, lightDirection, rng, samplePDF);
+    float2 samples = rng.rand2();
+    sampleSpecularDirection(material, localView, samples, rng, samplePDF);
+    reflectance = evaluateBRDF(material, normal, viewDirection, lightDirection, rng);
 
     // Calculate combined PDF for current sample
     // Note: has some duplicated calculations in evaluateBRDFSpecular and sampleGGXPDF
@@ -945,7 +983,7 @@ float3 sampleBRDFAndEvaluateSpecular(MaterialBRDF material, inout RNG randomNG, 
 
     // Sample specular BRDF component
     float2 samples = randomNG.rand2();
-    float3 newLight = sampleSpecularDirection(material, localView, samples, randomNG);
+    float3 newLight = sampleSpecularDirection(material, localView, samples, randomNG, pdf);
 
     // Evaluate BRDF for new light direction
     float dotNL = clamp(newLight.z, -1.0f, 1.0f);
@@ -955,7 +993,7 @@ float3 sampleBRDFAndEvaluateSpecular(MaterialBRDF material, inout RNG randomNG, 
     float dotHV = saturate(dot(halfVector, localView));
     float dotNH = clamp(halfVector.z, -1.0f, 1.0f);
     float dotNV = clamp(localView.z, -1.0f, 1.0f);
-    reflectance = evaluateBRDF(material, float3(0,0,1), localView, newLight, randomNG, pdf);
+    reflectance = evaluateBRDF(material, float3(0,0,1), localView, newLight, randomNG);
 
     // Calculate combined PDF for current sample
     // Note: has some duplicated calculations in evaluateBRDF_GGX and sampleBRDFPDF
@@ -986,7 +1024,7 @@ float3 sampleBRDFSpecular(MaterialBRDF material, inout RNG randomNG, float3 norm
 
     // Sample specular BRDF component
     float2 samples = randomNG.rand2();
-    float3 newLight = sampleSpecularDirection(material, localView, samples, randomNG);
+    float3 newLight = sampleSpecularDirection(material, localView, samples, randomNG, pdf);
 
     // Calculate half vector
     float3 halfVector = normalize(localView + newLight);
@@ -995,7 +1033,8 @@ float3 sampleBRDFSpecular(MaterialBRDF material, inout RNG randomNG, float3 norm
     float dotNV = clamp(localView.z, -1.0f, 1.0f);
 
     // Calculate combined PDF for current sample
-    pdf = sampleGGXPDF(material.roughnessAlpha, material.roughnessAlphaSqr, dotNH, dotNV, localView);
+    if (pdf==0)
+        pdf = sampleGGXPDF(material.roughnessAlpha, material.roughnessAlphaSqr, dotNH, dotNV, localView);
 
     // Transform the new direction back into world space
     float3 lightDirection = normalize(localRotation.inverse().transform(newLight));

@@ -183,9 +183,7 @@ BRDFLobes evaluateBRDF_GGX(MaterialBRDF material, float dotHV, float dotNH, floa
     BRDFLobes r;
     r.isMetal = (material.metallicity > 0.5);
     // Calculate diffuse component
-    float3 F = fresnel(material.F0, dotHV);
-    float3 diffCompRGB = diffuseCompensation(F, dotHV);
-    r.diffuseShape = INV_PI * diffCompRGB.r;
+    r.diffuseShape = INV_PI;
 
 #ifndef DISABLE_SPECULAR_MATERIALS
     // Calculate specular component
@@ -250,13 +248,13 @@ float3 reconstructRGB(BRDFLobes lobes, MaterialBRDF material, float dotNL, float
 float3 reconstructRGB_Heitz(BRDFLobes lobes, MaterialBRDF material, float dotNL)
 {
     float3 diffuseRgb = material.albedo * lobes.diffuseShape;
-    float3 specularRgb = (lobes.specularSingleShape + lobes.specularMultiShape) * material.F0; // already full BSDF
+    float3 specularRgb = (lobes.specularSingleShape + lobes.specularMultiShape) * lobes.F0Rgb;
 
     return (diffuseRgb + specularRgb) * saturate(dotNL);
 }
 
 template<typename RNG>
-float3 evaluateBRDF(MaterialBRDF material, float3 normal, float3 viewDirection, float3 lightDirection, inout RNG rng, out float pdf)
+float3 evaluateBRDF(MaterialBRDF material, float3 normal, float3 viewDirection, float3 lightDirection, inout RNG rng)
 {
     switch (material.brdfType)
     {
@@ -265,7 +263,6 @@ float3 evaluateBRDF(MaterialBRDF material, float3 normal, float3 viewDirection, 
                 float dotHV = saturate(dot(H, viewDirection));
                 float dotNL = saturate(dot(normal, lightDirection));
                 BRDFLobes lobes = CookTorrance(normal, viewDirection, lightDirection, material);
-                pdf = 0.0f;
                 return reconstructRGB(lobes, material, dotNL, dotHV, 0.0f.xxx);
             }
         case BRDF_FastMSX:{
@@ -274,7 +271,6 @@ float3 evaluateBRDF(MaterialBRDF material, float3 normal, float3 viewDirection, 
                 float dotNL = saturate(dot(normal, lightDirection));
                 BRDFLobes lobes = FastMSX(normal, viewDirection, lightDirection, material);
                 float3 F = FresnelSchlick(dotHV, lobes.F0Rgb);
-                pdf = 0.0f;
                 return reconstructRGB(lobes, material, dotNL, dotHV, F * F);
             }
         case BRDF_Heitz_GGX:
@@ -282,7 +278,6 @@ float3 evaluateBRDF(MaterialBRDF material, float3 normal, float3 viewDirection, 
         case BRDF_Heitz_Beckmann:{
                 float dotNL = saturate(dot(normal, lightDirection));
                 BRDFLobes lobes = Heitz(normal, viewDirection, lightDirection, material, rng);
-                pdf = max(lobes.specularSingleShape + lobes.specularMultiShape, 1e-6);
                 return reconstructRGB_Heitz(lobes, material, dotNL);
             }
         case BRDF_GGX:
@@ -294,7 +289,6 @@ float3 evaluateBRDF(MaterialBRDF material, float3 normal, float3 viewDirection, 
             float dotNL = saturate(dot(normal, lightDirection));
             float dotNV = saturate(dot(normal, viewDirection));
             BRDFLobes lobes = evaluateBRDF_GGX(material, dotHV, dotNH, dotNL, dotNV);
-            pdf = 0;
             return reconstructRGB(lobes, material, dotNL, dotHV, 0.0f.xxx);
         }
     }
