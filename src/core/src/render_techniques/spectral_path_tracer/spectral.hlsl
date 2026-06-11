@@ -31,6 +31,7 @@ float SampleVisibleWavelengths(float u)
 
     return 538.0f - 138.888889f * atanh_approx(0.85691062f - 1.82750197f * u);
 }
+
  /// Wyman et al. Simple Analytic Approximations to the CIE XYZ Color Matching Functions
 float xFit_1931(float wave)
 {
@@ -98,18 +99,31 @@ float sampleHeroWavelengthUniform(float u)
     
     return lerp(g_LambdaMin, g_LambdaMax, u);
 }
+float RotateWavelength(float lambda_h, float lambdaMin, float lambdaMax, int j, int C)
+{
+    float lambdaBar = lambdaMax - lambdaMin;
+    float offset = (j / (float) C) * lambdaBar;
+
+    float rotated = lambda_h - lambdaMin + offset;
+    rotated = fmod(rotated, lambdaBar);
+
+    if (rotated < 0.0f)
+        rotated += lambdaBar;
+
+    return rotated + lambdaMin;
+}   
 
 void sampleHeroWavelengths3(inout Random rng, out float3 lambda, out float3 pdf)
 {
     float u = rng.rand();
 
-    float u0 = frac(u + 0.0 / 3.0);
-    float u1 = frac(u + 1.0 / 3.0);
-    float u2 = frac(u + 2.0 / 3.0);
+    const int C = 3;
 
-    lambda.x = SampleVisibleWavelengths(u0);
-    lambda.y = SampleVisibleWavelengths(u1);
-    lambda.z = SampleVisibleWavelengths(u2);
+    float lambda_h = SampleVisibleWavelengths(u);
+
+    lambda.x = lambda_h;
+    lambda.y = RotateWavelength(lambda_h, g_LambdaMin, g_LambdaMax, 1, C);
+    lambda.z = RotateWavelength(lambda_h, g_LambdaMin, g_LambdaMax, 2, C);
 
     pdf.x = VisibleWavelengthsPDF(lambda.x);
     pdf.y = VisibleWavelengthsPDF(lambda.y);
