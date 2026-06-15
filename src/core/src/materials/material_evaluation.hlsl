@@ -25,6 +25,13 @@ THE SOFTWARE.
 
 #include "materials.hlsl"
 #include "math/math_constants.hlsl"
+#define GGX             0
+#define COOK_TORRANCE   1 
+#define FAST_MSX        2
+#define HEITZ_BECKMANN  3
+#define HEITZ_STUDENTT  4
+#define HEITZ_GGX       5
+
 struct BRDFLobes
 {
     float diffuseShape; // Lambertian shape only, no color
@@ -236,6 +243,7 @@ float3 evaluateBRDF_GGX(MaterialBRDF material, float3 normal, float3 viewDirecti
 #endif
     return brdf;
 }
+
 float3 reconstructRGB(BRDFLobes lobes, MaterialBRDF material, float dotNL, float dotHV, float3 fMulti)
 {
     float3 diffuseRgb = material.albedo * lobes.diffuseShape;
@@ -256,42 +264,32 @@ float3 reconstructRGB_Heitz(BRDFLobes lobes, MaterialBRDF material, float dotNL)
 template<typename RNG>
 float3 evaluateBRDF(MaterialBRDF material, float3 normal, float3 viewDirection, float3 lightDirection, inout RNG rng)
 {
-    switch (material.brdfType)
-    {
-        case BRDF_CookTorr:{
-                float3 H = normalize(viewDirection + lightDirection);
-                float dotHV = saturate(dot(H, viewDirection));
-                float dotNL = saturate(dot(normal, lightDirection));
-                BRDFLobes lobes = CookTorrance(normal, viewDirection, lightDirection, material);
-                return reconstructRGB(lobes, material, dotNL, dotHV, 0.0f.xxx);
-            }
-        case BRDF_FastMSX:{
-                float3 H = normalize(viewDirection + lightDirection);
-                float dotHV = saturate(dot(H, viewDirection));
-                float dotNL = saturate(dot(normal, lightDirection));
-                BRDFLobes lobes = FastMSX(normal, viewDirection, lightDirection, material);
-                float3 F = FresnelSchlick(dotHV, lobes.F0Rgb);
-                return reconstructRGB(lobes, material, dotNL, dotHV, F * F);
-            }
-        case BRDF_Heitz_GGX:
-        case BRDF_Heitz_StudentT:
-        case BRDF_Heitz_Beckmann:{
-                float dotNL = saturate(dot(normal, lightDirection));
-                BRDFLobes lobes = Heitz(normal, viewDirection, lightDirection, material, rng);
-                return reconstructRGB_Heitz(lobes, material, dotNL);
-            }
-        case BRDF_GGX:
-        default:
-        {
-            float3 H = normalize(viewDirection + lightDirection);
-            float dotHV = saturate(dot(H, viewDirection));
-            float dotNH = saturate(dot(normal, H));
-            float dotNL = saturate(dot(normal, lightDirection));
-            float dotNV = saturate(dot(normal, viewDirection));
-            BRDFLobes lobes = evaluateBRDF_GGX(material, dotHV, dotNH, dotNL, dotNV);
-            return reconstructRGB(lobes, material, dotNL, dotHV, 0.0f.xxx);
-        }
-    }
+#if BRDF_MODEL == COOK_TORRANCE
+    float3 H = normalize(viewDirection + lightDirection);
+    float dotHV = saturate(dot(H, viewDirection));
+    float dotNL = saturate(dot(normal, lightDirection));
+    BRDFLobes lobes = CookTorrance(normal, viewDirection, lightDirection, material);
+    return reconstructRGB(lobes, material, dotNL, dotHV, 0.0f.xxx);
+#elif BRDF_MODEL == FAST_MSX
+    float3 H = normalize(viewDirection + lightDirection);
+    float dotHV = saturate(dot(H, viewDirection));
+    float dotNL = saturate(dot(normal, lightDirection));
+    BRDFLobes lobes = FastMSX(normal, viewDirection, lightDirection, material);
+    float3 F = FresnelSchlick(dotHV, lobes.F0Rgb);
+    return reconstructRGB(lobes, material, dotNL, dotHV, F * F);
+#elif BRDF_MODEL == HEITZ_GGX || BRDF_MODEL == HEITZ_STUDENTT || BRDF_MODEL == HEITZ_BECKMANN
+    float dotNL = saturate(dot(normal, lightDirection));
+    BRDFLobes lobes = Heitz(normal, viewDirection, lightDirection, material, rng);
+    return reconstructRGB_Heitz(lobes, material, dotNL);
+#else
+    float3 H = normalize(viewDirection + lightDirection);
+    float dotHV = saturate(dot(H, viewDirection));
+    float dotNH = saturate(dot(normal, H));
+    float dotNL = saturate(dot(normal, lightDirection));
+    float dotNV = saturate(dot(normal, viewDirection));
+    BRDFLobes lobes = evaluateBRDF_GGX(material, dotHV, dotNH, dotNL, dotNV);
+    return reconstructRGB(lobes, material, dotNL, dotHV, 0.0f.xxx);
+#endif
 }
 /**
  * Evaluate the BRDF for the diffuse and specular BRDF components separately.

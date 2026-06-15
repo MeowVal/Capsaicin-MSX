@@ -196,22 +196,12 @@ MaterialEvaluated MakeMaterialEvaluated(Material material, float2 uv, float2 gra
     };
     return ret;
 }
-enum BRDFType : uint
-{
-    BRDF_GGX      = 0,
-    BRDF_CookTorr = 1,
-    BRDF_FastMSX  = 2,
-    BRDF_Heitz_Beckmann = 3,
-    BRDF_Heitz_StudentT = 4,
-    BRDF_Heitz_GGX = 5,
-};
 
 /** Material data required for current BRDF type. */
 struct MaterialBRDF
 {
     float3 albedo;
     float3 albedo_srgb_nl;
-    uint brdfType;
     float metallicity;
     float gamma;
     uint mpmlIndex;
@@ -264,7 +254,7 @@ float ClampAlphaRoughness(const float alpha)
  * @param material The material to evaluate.
  * @return The new material data.
  */
-MaterialBRDF MakeMaterialBRDF(MaterialEvaluated material, uint brdfType)
+MaterialBRDF MakeMaterialBRDF(MaterialEvaluated material)
 {
     float3 albedo = material.albedo_linear;
     float3 albedo_srgb_nl = material.albedo_srgb_nl;
@@ -282,7 +272,6 @@ MaterialBRDF MakeMaterialBRDF(MaterialEvaluated material, uint brdfType)
     {
         albedo,
         albedo_srgb_nl,
-        (BRDFType)brdfType,
         material.metallicity,
      3,
      0,
@@ -304,9 +293,9 @@ MaterialBRDF MakeMaterialBRDF(MaterialEvaluated material, uint brdfType)
  * @param uv       The texture UV values at intersected position.
  * @return The new material data.
  */
-MaterialBRDF MakeMaterialBRDF(Material material, float2 uv, uint brdfType)
+MaterialBRDF MakeMaterialBRDF(Material material, float2 uv)
 {
-    return MakeMaterialBRDF(MakeMaterialEvaluated(material, uv), brdfType);
+    return MakeMaterialBRDF(MakeMaterialEvaluated(material, uv));
 }
 
 /**
@@ -317,9 +306,9 @@ MaterialBRDF MakeMaterialBRDF(Material material, float2 uv, uint brdfType)
  * @param gradY    The UV partial derivatives along the Y axis.
  * @return The new material data.
  */
-MaterialBRDF MakeMaterialBRDF(Material material, float2 uv, float2 gradX, float2 gradY, uint brdfType)
+MaterialBRDF MakeMaterialBRDF(Material material, float2 uv, float2 gradX, float2 gradY)
 {
-    return MakeMaterialBRDF(MakeMaterialEvaluated(material, uv, gradX, gradY), brdfType);
+    return MakeMaterialBRDF(MakeMaterialEvaluated(material, uv, gradX, gradY));
 }
 
 /** Material data required for checking current alpha mask/blend. */
@@ -429,9 +418,9 @@ float4 emissiveAlphaScaled(Material material, float2 uv, float2 gradX, float2 gr
  * @param uv       The texture UV values at intersected position.
  * @return The new material data.
  */
-MaterialBSDF MakeMaterialBSDF(Material material, float2 uv, BRDFType brdfType)
+MaterialBSDF MakeMaterialBSDF(Material material, float2 uv)
 {
-    MaterialBRDF materialBRDF = MakeMaterialBRDF(material, uv, brdfType);
+    MaterialBRDF materialBRDF = MakeMaterialBRDF(material, uv);
 
     float4 areaEmissivity = emissiveAlphaScaled(material, uv);
     float3 emissivity = areaEmissivity.xyz;
@@ -448,7 +437,6 @@ MaterialBSDF MakeMaterialBSDF(Material material, float2 uv, BRDFType brdfType)
     {
         materialBRDF.albedo,
         materialBRDF.albedo_srgb_nl,
-        materialBRDF.brdfType,
         materialBRDF.metallicity,
         materialBRDF.gamma,
         materialBRDF.mpmlIndex,
@@ -472,9 +460,9 @@ MaterialBSDF MakeMaterialBSDF(Material material, float2 uv, BRDFType brdfType)
  * @param gradY    The UV partial derivatives along the Y axis.
  * @return The new material data.
  */
-MaterialBSDF MakeMaterialBSDF(Material material, float2 uv, float2 gradX, float2 gradY, BRDFType brdfType)
+MaterialBSDF MakeMaterialBSDF(Material material, float2 uv, float2 gradX, float2 gradY)
 {
-    MaterialBRDF materialBRDF = MakeMaterialBRDF(material, uv, gradX, gradY, brdfType);
+    MaterialBRDF materialBRDF = MakeMaterialBRDF(material, uv, gradX, gradY);
 
     float4 areaEmissivity = emissiveAlphaScaled(material, uv);
     float3 emissivity = areaEmissivity.xyz;
@@ -491,7 +479,6 @@ MaterialBSDF MakeMaterialBSDF(Material material, float2 uv, float2 gradX, float2
     {
         materialBRDF.albedo,
         materialBRDF.albedo_srgb_nl,
-        materialBRDF.brdfType,
         materialBRDF.metallicity,
         materialBRDF.gamma,
         materialBRDF.mpmlIndex,
@@ -518,7 +505,6 @@ MaterialBRDF MakeMaterialBRDF(MaterialBSDF material)
     {
         material.albedo,
         material.albedo_srgb_nl,
-        material.brdfType,
         material.metallicity,
         material.gamma,
         material.mpmlIndex,
@@ -592,7 +578,7 @@ MaterialBRDF unpackMaterial(in uint packedMaterial)
     material2.metallicity = ((metallicityRoughness >> 8) & 0xFFu) / 255.0f;
     material2.roughness = ((metallicityRoughness >> 0) & 0xFFu) / 255.0f;
 
-    material = MakeMaterialBRDF(material2,0);
+    material = MakeMaterialBRDF(material2);
 #endif
     return material;
 }

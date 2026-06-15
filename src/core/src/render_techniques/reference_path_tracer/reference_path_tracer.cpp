@@ -168,7 +168,6 @@ void ReferencePT::render(CapsaicinInternal &capsaicin) noexcept
         gfx_, reference_pt_program_, "g_BounceRRCount", options.reference_pt_min_rr_bounces);
     gfxProgramSetParameter(gfx_, reference_pt_program_, "g_SampleCount", options.reference_pt_sample_count);
     gfxProgramSetParameter(gfx_, reference_pt_program_, "g_Accumulate", accumulate ? 1 : 0);
-    gfxProgramSetParameter(gfx_, reference_pt_program_, "g_BRDFModel", options.brdf_model);
 
     stratified_sampler->addProgramParameters(capsaicin, reference_pt_program_);
     rng->addProgramParameters(capsaicin, reference_pt_program_);
@@ -295,6 +294,11 @@ bool ReferencePT::initKernels(CapsaicinInternal const &capsaicin) noexcept
     {
         defines.push_back("DISABLE_NEE");
     }
+    std::string                     brdfDefine = "BRDF_MODEL=" + std::to_string(options.brdf_model);
+    static std::vector<std::string> persistentDefines;
+    persistentDefines.clear();
+    persistentDefines.push_back(brdfDefine);
+    defines.push_back(persistentDefines.back().c_str());
     if (options.reference_pt_use_dxr10)
     {
         std::vector<char const *>                     exports;
@@ -352,7 +356,8 @@ bool ReferencePT::needsRecompile(
 
     // Check if options change requires kernel recompile
     bool const recompile =
-        lightSampler->needsRecompile(capsaicin)
+        lightSampler->needsRecompile(capsaicin) 
+        || options.brdf_model != newOptions.brdf_model
         || options.reference_pt_disable_albedo_materials != newOptions.reference_pt_disable_albedo_materials
         || options.reference_pt_disable_direct_lighting != newOptions.reference_pt_disable_direct_lighting
         || options.reference_pt_disable_specular_materials

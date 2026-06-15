@@ -568,7 +568,7 @@ bool pathHit(inout RayInfo ray, HitInfo hitData, IntersectData iData, inout Stra
     //    return false;
     //}
 
-    MaterialBRDF materialBRDF = MakeMaterialBRDF(iData.material, iData.uv, g_BRDFModel);
+    MaterialBRDF materialBRDF = MakeMaterialBRDF(iData.material, iData.uv);
 #if defined(DISABLE_ALBEDO_MATERIAL)
     // Disable material albedo if requested
     if (currentBounce == 0)

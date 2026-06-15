@@ -43,7 +43,6 @@ StructuredBuffer<float> g_CIE_X;
 StructuredBuffer<float> g_CIE_Y;
 StructuredBuffer<float> g_CIE_Z;
 StructuredBuffer<float> g_CieD65;
-uint g_BRDFModel;
 
 StructuredBuffer<Instance> g_InstanceBuffer;
 StructuredBuffer<float3x4> g_TransformBuffer;
@@ -119,7 +118,8 @@ void pathTracer(in uint2 pixel, in uint2 dimensions)
     {
         return;
     }
-
+    //radiance = convertXYZToBT709(convertBT709ToXYZ(float3(0, 0, 1)));
+    
     // Accumulate previous samples
     if (g_Accumulate != 0)
     {

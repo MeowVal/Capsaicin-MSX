@@ -5,6 +5,13 @@
 #include "components/random_number_generator/random_number_generator.hlsl"
 #include "lights/light_evaluation.hlsl"
 #include "math/color.hlsl"
+#define GGX             0
+#define COOK_TORRANCE   1 
+#define FAST_MSX        2
+#define HEITZ_BECKMANN  3
+#define HEITZ_STUDENTT  4
+#define HEITZ_GGX       5
+
 static const float g_LambdaMin = 360.0f;
 static const float g_LambdaMax = 830.0f;
 
@@ -57,25 +64,21 @@ float ComputeCMFScale()
 {
     float3 XYZ_white = float3(0, 0, 0);
 
-    for (float lambda = 360.0; lambda <= 830.0; lambda += 5.0)
+    for (float lambda = g_LambdaMin; lambda <= g_LambdaMax; lambda += 5.0)
     {
-        float pdf = VisibleWavelengthsPDF(lambda);
         float3 cmf = float3(
             xFit_1931(lambda),
             yFit_1931(lambda),
             zFit_1931(lambda)
-        ) / pdf;
+        ) ;
 
         XYZ_white += cmf;
     }
 
     XYZ_white *= 5.0; // nm step
-    const float3x3 XYZ_to_BT709 = float3x3(3.240835667f, -1.537319541f, -0.4985901117f,
-        -0.9692294598f, 1.875940084f, 0.04155444726f,
-        0.05564493686f, -0.2040314376f, 1.057253838f);
-    float3 rgbWhite = mul(XYZ_to_BT709, XYZ_white);
+    float3 rgbWhite = convertXYZToBT709(XYZ_white);
 
-    return (1.0 / rgbWhite.y) * 235; // WB1 normalization   (1.0 / rgbWhite.y) * 235
+    return (1.0 / rgbWhite.y) ; // WB1 normalization   (1.0 / rgbWhite.y)       0.865
 }
 static float CMF_SCALE = ComputeCMFScale();
 void sampleHeroWavelength(inout Random rng, out float lambda, out float pdf)
@@ -99,6 +102,7 @@ float sampleHeroWavelengthUniform(float u)
     
     return lerp(g_LambdaMin, g_LambdaMax, u);
 }
+
 float RotateWavelength(float lambda_h, float lambdaMin, float lambdaMax, int j, int C)
 {
     float lambdaBar = lambdaMax - lambdaMin;
@@ -377,6 +381,7 @@ float3 PBRT_CMF(float lambda)
         zFit_1931(lambda)
     ) * CMF_SCALE;
 }
+
 float3 HeroWavelengthContribution(float lambda, float L_lambda, float pdf_lambda)
 {
     float3 xyz = (PBRT_CMF(lambda) * L_lambda) / pdf_lambda;
@@ -386,13 +391,15 @@ float3 HeroWavelengthContribution(float lambda, float L_lambda, float pdf_lambda
 float3 HeroWavelengthContribution3(float3 lambda, float3 L_lambda, float3 pdf_lambda)
 {
     float3 xyz = 0;
-    xyz += HeroWavelengthContribution(lambda.x, L_lambda.x, pdf_lambda.x);
-    xyz += HeroWavelengthContribution(lambda.y, L_lambda.y, pdf_lambda.y);
-    xyz += HeroWavelengthContribution(lambda.z, L_lambda.z, pdf_lambda.z);  
+    float p_combined = (pdf_lambda.x + pdf_lambda.y + pdf_lambda.z) / 3.0;
+    xyz += HeroWavelengthContribution(lambda.x, L_lambda.x, p_combined);
+    xyz += HeroWavelengthContribution(lambda.y, L_lambda.y, p_combined);
+    xyz += HeroWavelengthContribution(lambda.z, L_lambda.z, p_combined);
     xyz /= 3.0f;
     
     return xyz;
 }
+
 float3 SpectralToXYZSingle(float lambda, float T_lambda, float pdf_lambda)
 {
     float3 xyz = 0;
@@ -605,87 +612,66 @@ float3 reconstructSpectral3_Heitz( BRDFLobes lobes, MaterialBRDF material, float
 template<typename RNG>
 float evaluateBRDFSpectral(MaterialBRDF material, float3 normal, float3 viewDirection, float3 lightDirection, float lambda, inout RNG rng)
 {
-    switch (material.brdfType)
-    {
-        case BRDF_CookTorr:{
-                float3 H = normalize(viewDirection + lightDirection);
-                float dotHV = saturate(dot(H, viewDirection));
-                float dotNL = saturate(dot(normal, lightDirection));
-                BRDFLobes lobes = CookTorrance(normal, viewDirection, lightDirection, material);
-                return reconstructSpectral(lobes, material, lambda, dotNL, dotHV, 0);
-            }
-        case BRDF_FastMSX:{
-                float3 H = normalize(viewDirection + lightDirection);
-                float dotHV = saturate(dot(H, viewDirection));
-                float dotNL = saturate(dot(normal, lightDirection));
-                BRDFLobes lobes = FastMSX(normal, viewDirection, lightDirection, material);
-                float f0Lambda = RGBToSpectrumTableSingle(lambda, lobes.F0Rgb);
-                float fLambda = FresnelSchlickScalar(dotHV, f0Lambda);
-                return reconstructSpectral(lobes, material, lambda, dotNL, dotHV, fLambda * fLambda);
-            }
-        case BRDF_Heitz_Beckmann:
-        case BRDF_Heitz_GGX:
-        case BRDF_Heitz_StudentT:{
-                float dotNL = saturate(dot(normal, lightDirection));
-                BRDFLobes lobes = Heitz(normal, viewDirection, lightDirection, material, rng);
-                return reconstructSpectralHeitz(lobes, material, lambda, dotNL);
-            }
-        case BRDF_GGX:
-        default:
-        {
-                float3 H = normalize(viewDirection + lightDirection);
-                float dotHV = saturate(dot(H, viewDirection));
-                float dotNH = saturate(dot(normal, H));
-                float dotNL = saturate(dot(normal, lightDirection));
-                float dotNV = saturate(dot(normal, viewDirection));
-                BRDFLobes lobes = evaluateBRDF_GGX(material, dotHV, dotNH, dotNL, dotNV);
-                return reconstructSpectral(lobes, material, lambda, dotNL, dotHV, 0);
-            }
-    }
+#if BRDF_MODEL == COOK_TORRANCE 
+    float3 H = normalize(viewDirection + lightDirection);
+    float dotHV = saturate(dot(H, viewDirection));
+    float dotNL = saturate(dot(normal, lightDirection));
+    BRDFLobes lobes = CookTorrance(normal, viewDirection, lightDirection, material);
+    return reconstructSpectral3(lobes, material, lambda, dotNL, dotHV, 0);
+#elif BRDF_MODEL == FAST_MSX 
+    float3 H = normalize(viewDirection + lightDirection);
+    float dotHV = saturate(dot(H, viewDirection));
+    float dotNL = saturate(dot(normal, lightDirection));
+    BRDFLobes lobes = FastMSX(normal, viewDirection, lightDirection, material);
+    float3 f0Lambda = RGBToSpectrumTable3(lambda, lobes.F0Rgb);
+    float3 fLambda = FresnelSchlickScalar3(dotHV, f0Lambda);
+    return reconstructSpectral3(lobes, material, lambda, dotNL, dotHV, fLambda * fLambda);
+#elif BRDF_MODEL == HEITZ_BECKMANN || BRDF_MODEL == HEITZ_GGX || BRDF_MODEL == HEITZ_STUDENTT
+    float dotNL = saturate(dot(normal, lightDirection));
+    BRDFLobes lobes = Heitz(normal, viewDirection, lightDirection, material, randomNG);
+    return reconstructSpectral3_Heitz(lobes, material, lambda, dotNL);
+#else
+    float3 H = normalize(viewDirection + lightDirection);
+    float dotHV = saturate(dot(H, viewDirection));
+    float dotNH = saturate(dot(normal, H));
+    float dotNL = saturate(dot(normal, lightDirection));
+    float dotNV = saturate(dot(normal, viewDirection));
+    BRDFLobes lobes = evaluateBRDF_GGX(material, dotHV, dotNH, dotNL, dotNV);
+    return reconstructSpectral3(lobes, material, lambda, dotNL, dotHV, 0);
+#endif
 }*/
 
 template<typename RNG>
 float3 evaluateBRDFSpectral3(MaterialBRDF material, float3 normal, float3 viewDirection, float3 lightDirection, float3 lambda, inout RNG randomNG)
 {
-    switch (material.brdfType)
-    {
-        case BRDF_CookTorr:{
-                float3 H = normalize(viewDirection + lightDirection);
-                float dotHV = saturate(dot(H, viewDirection));
-                float dotNL = saturate(dot(normal, lightDirection));
-                BRDFLobes lobes = CookTorrance(normal, viewDirection, lightDirection, material);
-                return reconstructSpectral3(lobes, material, lambda, dotNL, dotHV, 0);
-            }
-        case BRDF_FastMSX:{
-                float3 H = normalize(viewDirection + lightDirection);
-                float dotHV = saturate(dot(H, viewDirection));
-                float dotNL = saturate(dot(normal, lightDirection));
-                BRDFLobes lobes = FastMSX(normal, viewDirection, lightDirection, material);
-                float3 f0Lambda = RGBToSpectrumTable3(lambda, lobes.F0Rgb);
-                float3 fLambda = FresnelSchlickScalar3(dotHV, f0Lambda);
-                return reconstructSpectral3(lobes, material, lambda, dotNL, dotHV, fLambda * fLambda);
-            }
-        case BRDF_Heitz_Beckmann:
-        case BRDF_Heitz_StudentT:
-        case BRDF_Heitz_GGX:
-            {
-                float dotNL = saturate(dot(normal, lightDirection));
-                BRDFLobes lobes = Heitz(normal, viewDirection, lightDirection, material, randomNG);
-                return reconstructSpectral3_Heitz(lobes, material, lambda, dotNL);
-            }
-        case BRDF_GGX:
-        default:
-        {
-                float3 H = normalize(viewDirection + lightDirection);
-                float dotHV = saturate(dot(H, viewDirection));
-                float dotNH = saturate(dot(normal, H));
-                float dotNL = saturate(dot(normal, lightDirection));
-                float dotNV = saturate(dot(normal, viewDirection));
-                BRDFLobes lobes = evaluateBRDF_GGX(material, dotHV, dotNH, dotNL, dotNV);
-                return reconstructSpectral3(lobes, material, lambda, dotNL, dotHV, 0);
-            }
-    }
 
+#if BRDF_MODEL == COOK_TORRANCE 
+    float3 H = normalize(viewDirection + lightDirection);
+    float dotHV = saturate(dot(H, viewDirection));
+    float dotNL = saturate(dot(normal, lightDirection));
+    BRDFLobes lobes = CookTorrance(normal, viewDirection, lightDirection, material);
+    return reconstructSpectral3(lobes, material, lambda, dotNL, dotHV, 0);
+#elif BRDF_MODEL == FAST_MSX 
+    float3 H = normalize(viewDirection + lightDirection);
+    float dotHV = saturate(dot(H, viewDirection));
+    float dotNL = saturate(dot(normal, lightDirection));
+    BRDFLobes lobes = FastMSX(normal, viewDirection, lightDirection, material);
+    float3 f0Lambda = RGBToSpectrumTable3(lambda, lobes.F0Rgb);
+    float3 fLambda = FresnelSchlickScalar3(dotHV, f0Lambda);
+    return reconstructSpectral3(lobes, material, lambda, dotNL, dotHV, fLambda * fLambda);
+#elif BRDF_MODEL == HEITZ_BECKMANN || BRDF_MODEL == HEITZ_GGX || BRDF_MODEL == HEITZ_STUDENTT
+    float dotNL = saturate(dot(normal, lightDirection));
+    BRDFLobes lobes = Heitz(normal, viewDirection, lightDirection, material, randomNG);
+    return reconstructSpectral3_Heitz(lobes, material, lambda, dotNL);
+#else
+    float3 H = normalize(viewDirection + lightDirection);
+    float dotHV = saturate(dot(H, viewDirection));
+    float dotNH = saturate(dot(normal, H));
+    float dotNL = saturate(dot(normal, lightDirection));
+    float dotNV = saturate(dot(normal, viewDirection));
+    BRDFLobes lobes = evaluateBRDF_GGX(material, dotHV, dotNH, dotNL, dotNV);
+    return reconstructSpectral3(lobes, material, lambda, dotNL, dotHV, 0);
+#endif
 }
 /*
 float evaluateBRDFDiffuseSpecular(MaterialBRDF material, float dotHV, float dotNL, float lambda)
@@ -904,15 +890,22 @@ float3 lambda, out float3 lightDirection, out float pdf)
     float specularDotHV = saturate(dot(specularHalfVector, localView));
     float probabilityBRDF = calculateBRDFProbability(material.F0, specularDotHV, material.albedo);
     float3 specularDirection = sampleSpecularDirection(material, localView, samples, randomNG, pdf);
-    if (randomNG.rand() < probabilityBRDF)
+    if (pdf == 0.0f)
     {
+        if (randomNG.rand() < probabilityBRDF)
+        {
         // Sample specular BRDF component
-        newLight = specularDirection;
+            newLight = specularDirection;
+        }
+        else
+        {
+        // Sample diffuse BRDF component
+            newLight = sampleLambert(samples);
+        }
     }
     else
     {
-        // Sample diffuse BRDF component
-        newLight = sampleLambert(samples);
+        newLight = specularDirection;
     }
 #else
     // Sample diffuse BRDF component

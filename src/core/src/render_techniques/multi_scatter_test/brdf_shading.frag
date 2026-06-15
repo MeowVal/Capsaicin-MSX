@@ -1,7 +1,6 @@
 #include "../../gpu_shared.h"
 cbuffer FrameCB : register(b0)
 {
-    uint g_BRDFModel;
     float3 _padding;
     float4x4 g_ViewProjectionInverse;
 };
@@ -61,7 +60,6 @@ SamplerState g_TextureSampler;
 #include "render_techniques/spectral_path_tracer/spectral.hlsl"
 #include "brdf_models.hlsl"
 
-
 static const float3 kLightDir = normalize(float3(0.4f, 0.8f, 0.2f));
 static const float3 kLightCol = float3(1.0f, 1.0f, 1.0f);
 
@@ -101,7 +99,7 @@ float4 main(float4 pos : SV_Position) : SV_Target0
     
     Material material = g_MaterialBuffer[instance.material_index];
     MaterialEvaluated me = MakeMaterialEvaluated(material, meshUV);
-    MaterialBRDF brdf = MakeMaterialBRDF(me, g_BRDFModel);
+    MaterialBRDF brdf = MakeMaterialBRDF(me);
 
     float3 V = normalize(g_Eye - worldPos);
     

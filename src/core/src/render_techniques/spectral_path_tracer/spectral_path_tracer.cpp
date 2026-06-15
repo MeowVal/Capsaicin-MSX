@@ -225,7 +225,6 @@ void SpectralPT::render(CapsaicinInternal &capsaicin) noexcept
         gfx_, spectral_pt_program_, "g_BounceRRCount", options.spectral_pt_min_rr_bounces);
     gfxProgramSetParameter(gfx_, spectral_pt_program_, "g_SampleCount", options.spectral_pt_sample_count);
     gfxProgramSetParameter(gfx_, spectral_pt_program_, "g_Accumulate", accumulate ? 1 : 0);
-    gfxProgramSetParameter(gfx_, spectral_pt_program_, "g_BRDFModel", options.brdf_model);
 
     gfxProgramSetTexture(gfx_, spectral_pt_program_, "g_RGB2SpecLUT0", rgb2SpecLUT[0]);
     gfxProgramSetTexture(gfx_, spectral_pt_program_, "g_RGB2SpecLUT1", rgb2SpecLUT[1]);
@@ -342,7 +341,7 @@ bool SpectralPT::initKernels(CapsaicinInternal const &capsaicin) noexcept
     auto const                lightSampler = capsaicin.getComponent<LightSamplerSwitcher>();
     std::vector const         baseDefines(lightSampler->getShaderDefines(capsaicin));
     std::vector<char const *> defines;
-    defines.reserve(baseDefines.size());
+    defines.reserve(baseDefines.size() + 8);
     for (auto const &i : baseDefines)
     {
         defines.push_back(i.c_str());
@@ -371,6 +370,11 @@ bool SpectralPT::initKernels(CapsaicinInternal const &capsaicin) noexcept
     {
         defines.push_back("DISABLE_NEE");
     }
+    std::string brdfDefine = "BRDF_MODEL=" + std::to_string(options.brdf_model);
+    static std::vector<std::string> persistentDefines;
+    persistentDefines.clear();
+    persistentDefines.push_back(brdfDefine);
+    defines.push_back(persistentDefines.back().c_str());
     if (options.spectral_pt_use_dxr10)
     {
         std::vector<char const *>                     exports;
@@ -428,7 +432,8 @@ bool SpectralPT::needsRecompile(
 
     // Check if options change requires kernel recompile
     bool const recompile =
-        lightSampler->needsRecompile(capsaicin)
+        lightSampler->needsRecompile(capsaicin) 
+        || options.brdf_model != newOptions.brdf_model
         || options.spectral_pt_disable_albedo_materials != newOptions.spectral_pt_disable_albedo_materials
         || options.spectral_pt_disable_direct_lighting != newOptions.spectral_pt_disable_direct_lighting
         || options.spectral_pt_disable_specular_materials

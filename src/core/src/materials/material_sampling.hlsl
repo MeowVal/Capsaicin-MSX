@@ -32,6 +32,13 @@ THE SOFTWARE.
 #define GGX_SAMPLE_VNDF_CAP     2  /**< Use Spherical Cap VNDF sampling */
 #define GGX_SAMPLE_VNDF_BOUNDED 3  /**< Use Bounded Spherical Cap VNDF sampling */
 
+#define GGX             0
+#define COOK_TORRANCE   1 
+#define FAST_MSX        2
+#define HEITZ_BECKMANN  3
+#define HEITZ_STUDENTT  4
+#define HEITZ_GGX       5
+
 #ifndef GGX_SAMPLE_ALGORITHM
 #   define GGX_SAMPLE_ALGORITHM GGX_SAMPLE_VNDF_BOUNDED
 #endif
@@ -195,69 +202,58 @@ float3 sampleGGX(float roughnessAlpha, float3 localView, float2 samples)
 template<typename RNG>
 float3 sampleSpecularDirection(MaterialBRDF material, float3 localView, float2 samples, inout RNG randomNG, out float pdf)
 {
-    switch (material.brdfType)
-    {
-        case BRDF_Heitz_StudentT:{
-                float scatteringOrder;
-                float alphaX = material.roughnessAlpha;
-                float alphaY = alphaX;
-                bool isConductor = (material.metallicity >= 1.0f);
-                bool isTransmissive = (material.transmission > 0.0f);
-                bool isDielectric = !isConductor && !isTransmissive;
-                bool heightUniform = false;
-                int ndf = 2;
-                if (isTransmissive)
-                    return dielectricSample(localView, scatteringOrder, heightUniform, alphaX, alphaY, ndf, material.ior, randomNG, true, pdf); //   dielectric transmission
-                if (isConductor)
-                    return microsurfaceSample(material, localView, scatteringOrder, heightUniform, alphaX, alphaY, ndf, randomNG, pdf); // conductive
-                if (isDielectric)
-                    return dielectricSample(localView, scatteringOrder, heightUniform, alphaX, alphaY, ndf, material.ior, randomNG, false, pdf); // dielectric reflection
+#if BRDF_MODEL == HEITZ_STUDENTT
+    float scatteringOrder;
+    float alphaX = material.roughnessAlpha;
+    float alphaY = alphaX;
+    bool isConductor = (material.metallicity >= 1.0f);
+    bool isTransmissive = (material.transmission > 0.0f);
+    bool isDielectric = !isConductor && !isTransmissive;
+    bool heightUniform = false;
+    if (isTransmissive)
+        return dielectricSample(localView, scatteringOrder, heightUniform, alphaX, alphaY, material.ior, randomNG, true, pdf); //   dielectric transmission
+    if (isConductor)
+        return microsurfaceSample(material, localView, scatteringOrder, heightUniform, alphaX, alphaY, randomNG, pdf); // conductive
+    if (isDielectric)
+        return dielectricSample(localView, scatteringOrder, heightUniform, alphaX, alphaY, material.ior, randomNG, false, pdf); // dielectric reflection
 
-                return microsurfaceSample(material, localView, scatteringOrder, heightUniform, alphaX, alphaY, ndf, randomNG, pdf); // diffuse
-            }
-        case BRDF_Heitz_GGX:{
-                float scatteringOrder;
-                float alphaX = material.roughnessAlpha;
-                float alphaY = alphaX;
-                bool isConductor = (material.metallicity >= 1.0f);
-                bool isTransmissive = (material.transmission > 0.0f);
-                bool isDielectric = !isConductor && !isTransmissive;
-                bool heightUniform = false;
-                int ndf = 1;
-                if (isTransmissive)
-                    return dielectricSample(localView, scatteringOrder, heightUniform, alphaX, alphaY, ndf, material.ior, randomNG, true, pdf); //   dielectric transmission
-                if (isConductor)
-                    return microsurfaceSample(material, localView, scatteringOrder, heightUniform, alphaX, alphaY, ndf, randomNG, pdf); // conductive
-                if (isDielectric)
-                    return dielectricSample(localView, scatteringOrder, heightUniform, alphaX, alphaY, ndf, material.ior, randomNG, false, pdf); // dielectric reflection
+    return microsurfaceSample(material, localView, scatteringOrder, heightUniform, alphaX, alphaY, randomNG, pdf); // diffuse
+#elif BRDF_MODEL == HEITZ_GGX
+    float scatteringOrder;
+    float alphaX = material.roughnessAlpha;
+    float alphaY = alphaX;
+    bool isConductor = (material.metallicity >= 1.0f);
+    bool isTransmissive = (material.transmission > 0.0f);
+    bool isDielectric = !isConductor && !isTransmissive;
+    bool heightUniform = false;
+    if (isTransmissive)
+        return dielectricSample(localView, scatteringOrder, heightUniform, alphaX, alphaY, material.ior, randomNG, true, pdf); //   dielectric transmission
+    if (isConductor)
+        return microsurfaceSample(material, localView, scatteringOrder, heightUniform, alphaX, alphaY, randomNG, pdf); // conductive
+    if (isDielectric)
+        return dielectricSample(localView, scatteringOrder, heightUniform, alphaX, alphaY, material.ior, randomNG, false, pdf); // dielectric reflection
 
-                return microsurfaceSample(material, localView, scatteringOrder, heightUniform, alphaX, alphaY, ndf, randomNG, pdf); // diffuse
-            }
-        case BRDF_Heitz_Beckmann:{
-                float scatteringOrder;
-                float alphaX = material.roughnessAlpha;
-                float alphaY = alphaX;
-                bool isConductor = (material.metallicity >= 1.0f);
-                bool isTransmissive = (material.transmission > 0.0f);
-                bool isDielectric = !isConductor && !isTransmissive;
-                bool heightUniform = false;
-                int ndf = 0;
-                if (isTransmissive)
-                    return dielectricSample(localView, scatteringOrder, heightUniform, alphaX, alphaY, ndf, material.ior, randomNG, true, pdf); //   dielectric transmission
-                if (isConductor)
-                    return microsurfaceSample(material, localView, scatteringOrder, heightUniform, alphaX, alphaY, ndf, randomNG, pdf); // conductive
-                if (isDielectric)
-                    return dielectricSample(localView, scatteringOrder, heightUniform, alphaX, alphaY, ndf, material.ior, randomNG, false, pdf); // dielectric reflection
+    return microsurfaceSample(material, localView, scatteringOrder, heightUniform, alphaX, alphaY, randomNG, pdf); // diffuse
+#elif BRDF_MODEL == HEITZ_BECKMANN
+    float scatteringOrder;
+    float alphaX = material.roughnessAlpha;
+    float alphaY = alphaX;
+    bool isConductor = (material.metallicity >= 1.0f);
+    bool isTransmissive = (material.transmission > 0.0f);
+    bool isDielectric = !isConductor && !isTransmissive;
+    bool heightUniform = false;
+    if (isTransmissive)
+        return dielectricSample(localView, scatteringOrder, heightUniform, alphaX, alphaY, material.ior, randomNG, true, pdf); //   dielectric transmission
+    if (isConductor)
+        return microsurfaceSample(material, localView, scatteringOrder, heightUniform, alphaX, alphaY, randomNG, pdf); // conductive
+    if (isDielectric)
+        return dielectricSample(localView, scatteringOrder, heightUniform, alphaX, alphaY, material.ior, randomNG, false, pdf); // dielectric reflection
 
-                return microsurfaceSample(material, localView, scatteringOrder, heightUniform, alphaX, alphaY, ndf, randomNG, pdf); // diffuse
-            }        
-        case BRDF_GGX:
-        case BRDF_CookTorr:
-        case BRDF_FastMSX:
-        default:
-            pdf = 0;
-            return sampleGGX(material.roughnessAlpha, localView, samples);
-    }
+    return microsurfaceSample(material, localView, scatteringOrder, heightUniform, alphaX, alphaY, randomNG, pdf); // diffuse
+#else
+    pdf = 0;
+    return sampleGGX(material.roughnessAlpha, localView, samples);
+#endif
 }
 
 
@@ -356,17 +352,7 @@ float3 calculateGGXSpecularDirection(float3 normal, float3 viewDirection, float 
 
 float3 estimateSpecularPeak(MaterialBRDF material, float3 normal, float3 viewDirection)
 {
-    switch (material.brdfType)
-    {
-        case BRDF_GGX:
-        case BRDF_CookTorr:
-        case BRDF_Heitz_Beckmann:
-        case BRDF_Heitz_GGX:
-        case BRDF_Heitz_StudentT:
-        case BRDF_FastMSX:
-        default:
-            return calculateGGXSpecularDirection(normal, viewDirection, sqrt(material.roughnessAlpha));
-    }
+    return calculateGGXSpecularDirection(normal, viewDirection, sqrt(material.roughnessAlpha));
 }
 
 /**
@@ -420,17 +406,7 @@ float calculateBRDFProbability(float3 F0, float dotHV, float3 albedo)
 
 float samplePDF(MaterialBRDF material, float dotNH, float dotNV, float3 localView, float3 halfVector)
 {
-    switch (material.brdfType)
-    {
-        case BRDF_Heitz_Beckmann:
-        case BRDF_Heitz_GGX:
-        case BRDF_Heitz_StudentT:
-        case BRDF_GGX:
-        case BRDF_CookTorr:
-        case BRDF_FastMSX:
-        default:
-            return sampleGGXPDF(material.roughnessAlpha, material.roughnessAlphaSqr, dotNH, dotNV, localView);
-    }
+    return sampleGGXPDF(material.roughnessAlpha, material.roughnessAlphaSqr, dotNH, dotNV, localView);
 }
 /**
  * Calculate the PDF for given values for the combined BRDF.
@@ -654,17 +630,26 @@ float3 sampleBRDFAndEvaluateType(MaterialBRDF material, inout RNG randomNG, floa
     float probabilityBRDF = calculateBRDFProbability(material.F0, specularDotHV, material.albedo);
     specularSampled = false;
     float3 specularDirection = sampleSpecularDirection(material, localView, samples, randomNG, pdf);
-    if (randomNG.rand() < probabilityBRDF)
+    if (pdf == 0.0f)
     {
+        if (randomNG.rand() < probabilityBRDF)
+        {
         // Sample specular BRDF component
+            newLight = specularDirection;
+            specularSampled = true;
+        }
+        else
+        {
+        // Sample diffuse BRDF component
+            newLight = sampleLambert(samples);
+        }
+    }  
+    else
+    {
         newLight = specularDirection;
         specularSampled = true;
     }
-    else
-    {
-        // Sample diffuse BRDF component
-        newLight = sampleLambert(samples);
-    }
+    
 #else
     // Sample diffuse BRDF component
     newLight = sampleLambert(samples);
@@ -748,15 +733,23 @@ float3 sampleBRDFType(MaterialBRDF material, inout RNG randomNG, float3 normal, 
     float probabilityBRDF = calculateBRDFProbability(material.F0, specularDotHV, material.albedo);
     specularSampled = (randomNG.rand() < probabilityBRDF ? true : false);
     float3 specularDirection = sampleSpecularDirection(material, localView, samples, randomNG, pdf);
-    if (specularSampled)
+    if (pdf == 0.0f)
     {
+        if (specularSampled)
+        {
         // Sample specular BRDF component
-        newLight = specularDirection;
+            newLight = specularDirection;
+        }
+        else
+        {
+        // Sample diffuse BRDF component
+            newLight = sampleLambert(samples);
+        }
     }
     else
     {
-        // Sample diffuse BRDF component
-        newLight = sampleLambert(samples);
+        newLight = specularDirection;
+        specularSampled = true;
     }
 #else
     // Sample diffuse BRDF component

@@ -50,7 +50,6 @@ uint g_SampleCount;
 uint g_Accumulate;
 
 uint g_FrameIndex;
-uint g_BRDFModel;
 
 StructuredBuffer<Instance> g_InstanceBuffer;
 StructuredBuffer<float3x4> g_TransformBuffer;
@@ -133,13 +132,21 @@ void pathTracer(in uint2 pixel, in uint2 dimensions)
     const float deltaLambda = 1.0f;
     const float N = 106.856895f;
     //XYZ_accum *= (deltaLambda / N);
-    float3 radiance = reconstructBT709(XYZ_accum);
+    float3 spectralRGB = reconstructBT709(XYZ_accum);
+    static const float3x3 M_correction = float3x3( // callculated from the error between the spectral RGB values and the BT.709 RGB values 
+    1.040, -0.387, 0.030,
+   -0.053, 1.054, -0.082,
+    0.004, -0.087, 1.010
+    );
+    // the colour error was Red = (255, 13, 2), Green = (95, 255, 22), and Blue = (22, 20, 254) instead of the Red = (255,0,0) , Green = (0,255,0), and Blue = (0,0,255) that you would expect. 
     // Check for incorrect calculations
-    if (any(isnan(radiance)) || any(isinf(radiance)) || any(radiance < 0.0f))
+    if (any(isnan(spectralRGB)) || any(isinf(spectralRGB)) || any(spectralRGB < 0.0f))
     {
         return;
     }
-
+    
+    float3 radiance = mul(M_correction, spectralRGB); // to correct the error of the Spectral to RGB conversion
+    //radiance = spectralRGB;
     // Accumulate previous samples
     if (g_Accumulate != 0)
     {

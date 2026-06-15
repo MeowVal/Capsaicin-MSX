@@ -197,8 +197,6 @@ void MultiScatterTests::render([[maybe_unused]] CapsaicinInternal &capsaicin) no
     {
         auto *ptr = gfxBufferGetData<FrameCBData>(gfx_, frameCB_);
 
-        ptr->brdf_model = options_.brdf_model;
-
         auto const &cam = capsaicin.getCameraMatrices(capsaicin.getOption<bool>("taa_enable"));
 
         ptr->view_proj_inv = cam.inv_view_projection;
