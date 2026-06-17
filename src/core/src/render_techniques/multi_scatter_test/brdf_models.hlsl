@@ -29,8 +29,17 @@ float GGX_NDF(float NdotH, float rough)
 {
     float a = rough;
     float a2 = ClampAlphaRoughness(a * a);
-    float denom = (NdotH * NdotH) * (a2 - 1.0) + 1.0;
-    return a2 / (PI * denom * denom);
+
+    // Heaviside function for microfacet normal in the upper hemisphere.
+    if (NdotH < 0.0f)
+    {
+        return 0.0f;
+    }
+
+    // Numerically stable form of Walter 2007 GGX NDF
+    float eps = 1e-5f;
+    float denom = (1.0f - NdotH * NdotH) / (a2 + eps) + NdotH * NdotH;
+    return 1.0f / (PI * a2 * denom * denom);
 }
 float3 F0(float3 albedo, float metal)
 {

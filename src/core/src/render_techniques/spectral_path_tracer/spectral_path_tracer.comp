@@ -124,7 +124,7 @@ void pathTracer(in uint2 pixel, in uint2 dimensions)
 
         traceFullPath(ray, randomStratified, randomNG, minBounces, maxBounces, payload);
         
-        float3 sampleXYZ = payload.xyz;
+        float3 sampleXYZ = payload.lambdaRadiance;
         
         // Calculate running average of samples (Welfords online algorithm)
         XYZ_accum = XYZ_accum + ((sampleXYZ - XYZ_accum) / (float) ++sample);

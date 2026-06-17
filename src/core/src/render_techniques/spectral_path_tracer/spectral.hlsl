@@ -25,6 +25,7 @@ float VisibleWavelengthsPDF(float lambda)
     float c = cosh(x);
     return 0.0039398042f / (c * c); 
 }
+
 float atanh_approx(float x)
 {
     return 0.5f * log((1.0f + x) / (1.0f - x));
@@ -81,6 +82,7 @@ float ComputeCMFScale()
     return (1.0 / rgbWhite.y) ; // WB1 normalization   (1.0 / rgbWhite.y)       0.865
 }
 static float CMF_SCALE = ComputeCMFScale();
+
 void sampleHeroWavelength(inout Random rng, out float lambda, out float pdf)
 {
     float u = rng.rand();
@@ -373,6 +375,7 @@ float3 PBRTCie1931(float lambda)
 
     return float3(x, y, z);
 }
+
 float3 PBRT_CMF(float lambda)
 {
     return float3(
