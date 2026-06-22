@@ -97,7 +97,8 @@ void Reservoir_ClampPrevious(inout Reservoir previous_reservoir)
 // Evaluates the target PDF, i.e., the luminance of the unshadowed illumination.
 float Reservoir_EvaluateTargetPdf(float3 view_direction, float3 normal, MaterialBRDF material, float3 light_direction, float3 light_radiance)
 {
-    float3 sampleReflectance = evaluateBRDF(material, normal, view_direction, light_direction);
+    float r = 1;
+    float3 sampleReflectance = evaluateBRDF_GGX(material, normal, view_direction, light_direction);
     return luminance(sampleReflectance * light_radiance);
 }
 
@@ -123,7 +124,7 @@ float3 evaluateBRDFNormalized(MaterialBRDF material, float3 normal, float3 viewD
 #else
     float albedo = luminance(diffuse_albedo);
 #endif
-    float3 brdf = evaluateBRDF(material, normal, viewDirection, lightDirection); // BRDF * cosine term.
+    float3 brdf = evaluateBRDF_GGX(material, normal, viewDirection, lightDirection); // BRDF * cosine term.
     return albedo > 0.0f ? brdf / albedo : saturate(dotNL) * INV_PI;
 }
 

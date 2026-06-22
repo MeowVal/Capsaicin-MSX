@@ -199,57 +199,59 @@ float3 sampleGGX(float roughnessAlpha, float3 localView, float2 samples)
     return sampledLight;
 }
 
+/**
+ * Calculate the approximate direction of the specular peak.
+ * @note This can be used in place of a light direction vector when calculating
+ * shading half-vectors when the light direction is unknown.
+ * @param normal         Shading normal vector at current position (must be normalised).
+ * @param viewDirection  Outgoing ray view direction (must be normalised).
+ * @param roughness      The GGX perceptual roughness (roughness = sqrt(roughnessAlpha).
+ * @return The calculated direction.
+ */
+float3 calculateGGXSpecularDirection(float3 normal, float3 viewDirection, float roughness)
+{
+    // Moving Frostbite to Physically Based Rendering 3.0, page 69
+    float3 reflection = reflect(-viewDirection, normal);
+    float smoothness = saturate(1 - roughness);
+    float lerpFactor = smoothness * (sqrt(smoothness) + roughness);
+    return normalize(lerp(normal, reflection, lerpFactor));
+}
+
+float3 estimateSpecularPeak(MaterialBRDF material, float3 normal, float3 viewDirection)
+{
+    return calculateGGXSpecularDirection(normal, viewDirection, sqrt(material.roughnessAlpha));
+}
+
 template<typename RNG>
 float3 sampleSpecularDirection(MaterialBRDF material, float3 localView, float2 samples, inout RNG randomNG, out float pdf)
 {
-#if BRDF_MODEL == HEITZ_STUDENTT
+#if BRDF_MODEL == HEITZ_STUDENTT || BRDF_MODEL == HEITZ_GGX || BRDF_MODEL == HEITZ_BECKMANN 
     float scatteringOrder;
     float alphaX = material.roughnessAlpha;
     float alphaY = alphaX;
-    bool isConductor = (material.metallicity >= 1.0f);
-    bool isTransmissive = (material.transmission > 0.0f);
-    bool isDielectric = !isConductor && !isTransmissive;
-    bool heightUniform = false;
-    if (isTransmissive)
-        return dielectricSample(localView, scatteringOrder, heightUniform, alphaX, alphaY, material.ior, randomNG, true, pdf); //   dielectric transmission
-    if (isConductor)
-        return microsurfaceSample(material, localView, scatteringOrder, heightUniform, alphaX, alphaY, randomNG, pdf); // conductive
-    if (isDielectric)
-        return dielectricSample(localView, scatteringOrder, heightUniform, alphaX, alphaY, material.ior, randomNG, false, pdf); // dielectric reflection
+    //bool isConductor = (material.metallicity >= 1.0f);
+    //bool isDielectric = !isConductor;
+    bool heightUniform = true;
 
-    return microsurfaceSample(material, localView, scatteringOrder, heightUniform, alphaX, alphaY, randomNG, pdf); // diffuse
-#elif BRDF_MODEL == HEITZ_GGX
-    float scatteringOrder;
-    float alphaX = material.roughnessAlpha;
-    float alphaY = alphaX;
-    bool isConductor = (material.metallicity >= 1.0f);
-    bool isTransmissive = (material.transmission > 0.0f);
-    bool isDielectric = !isConductor && !isTransmissive;
-    bool heightUniform = false;
-    if (isTransmissive)
-        return dielectricSample(localView, scatteringOrder, heightUniform, alphaX, alphaY, material.ior, randomNG, true, pdf); //   dielectric transmission
-    if (isConductor)
-        return microsurfaceSample(material, localView, scatteringOrder, heightUniform, alphaX, alphaY, randomNG, pdf); // conductive
-    if (isDielectric)
-        return dielectricSample(localView, scatteringOrder, heightUniform, alphaX, alphaY, material.ior, randomNG, false, pdf); // dielectric reflection
+    float pCond = material.metallicity;
+    float pDiel = 1.0f - pCond;
 
-    return microsurfaceSample(material, localView, scatteringOrder, heightUniform, alphaX, alphaY, randomNG, pdf); // diffuse
-#elif BRDF_MODEL == HEITZ_BECKMANN
-    float scatteringOrder;
-    float alphaX = material.roughnessAlpha;
-    float alphaY = alphaX;
-    bool isConductor = (material.metallicity >= 1.0f);
-    bool isTransmissive = (material.transmission > 0.0f);
-    bool isDielectric = !isConductor && !isTransmissive;
-    bool heightUniform = false;
-    if (isTransmissive)
-        return dielectricSample(localView, scatteringOrder, heightUniform, alphaX, alphaY, material.ior, randomNG, true, pdf); //   dielectric transmission
-    if (isConductor)
-        return microsurfaceSample(material, localView, scatteringOrder, heightUniform, alphaX, alphaY, randomNG, pdf); // conductive
-    if (isDielectric)
-        return dielectricSample(localView, scatteringOrder, heightUniform, alphaX, alphaY, material.ior, randomNG, false, pdf); // dielectric reflection
+    float r = randomNG.rand();
+    float3 wo;
+    float pdfLobe;
+    
+    if (r < pCond)
+    {
+        wo = microsurfaceSample(material, localView, scatteringOrder, heightUniform, alphaX, alphaY, randomNG, pdfLobe, true);
+        pdf = pCond * pdfLobe;   
+    }
+    else
+    {
+        wo = dielectricSample(localView, scatteringOrder, heightUniform, alphaX, alphaY, material.ior, randomNG, pdfLobe);  
+        pdf = pDiel * pdfLobe;
+    }
+    return wo;
 
-    return microsurfaceSample(material, localView, scatteringOrder, heightUniform, alphaX, alphaY, randomNG, pdf); // diffuse
 #else
     pdf = 0;
     return sampleGGX(material.roughnessAlpha, localView, samples);
@@ -332,28 +334,7 @@ float sampleGGXPDF(float roughnessAlpha, float roughnessAlphaSqr, float dotNH, f
     return pdf;
 }
 
-/**
- * Calculate the approximate direction of the specular peak.
- * @note This can be used in place of a light direction vector when calculating
- * shading half-vectors when the light direction is unknown.
- * @param normal         Shading normal vector at current position (must be normalised).
- * @param viewDirection  Outgoing ray view direction (must be normalised).
- * @param roughness      The GGX perceptual roughness (roughness = sqrt(roughnessAlpha).
- * @return The calculated direction.
- */
-float3 calculateGGXSpecularDirection(float3 normal, float3 viewDirection, float roughness)
-{
-    // Moving Frostbite to Physically Based Rendering 3.0, page 69
-    float3 reflection = reflect(-viewDirection, normal);
-    float smoothness = saturate(1 - roughness);
-    float lerpFactor = smoothness * (sqrt(smoothness) + roughness);
-    return normalize(lerp(normal, reflection, lerpFactor));
-}
 
-float3 estimateSpecularPeak(MaterialBRDF material, float3 normal, float3 viewDirection)
-{
-    return calculateGGXSpecularDirection(normal, viewDirection, sqrt(material.roughnessAlpha));
-}
 
 /**
  * Calculate a sampled direction for the Lambert BRDF.

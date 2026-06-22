@@ -92,6 +92,8 @@ SharedTextureList MultiScatterTests::getSharedTextures() const noexcept
     textures.push_back({.name = "Visibility"});
     textures.push_back({.name = "PrevCombinedIllumination"});
     textures.push_back({.name = "DisocclusionMask"});
+    textures.push_back({.name = "MaterialMetallicity"});
+    textures.push_back({.name = "MaterialRoughness"});
     return textures;
 }
 
@@ -103,6 +105,9 @@ DebugViewList MultiScatterTests::getDebugViews() const noexcept
     views.emplace_back("DirectLighting");
     return views;
 }
+
+static char const *BRDF_NAMES[] = {
+    "GGX", "CookTorrance", "FastMSX", "HeitzBeckmann", "HeitzStudentT", "HeitzGGX"};
 
 bool MultiScatterTests::init(CapsaicinInternal const &capsaicin) noexcept 
 {
@@ -168,7 +173,10 @@ bool MultiScatterTests::init(CapsaicinInternal const &capsaicin) noexcept
     GFX_PRINTLN("DirectLighting exists: %d\n", capsaicin.hasSharedTexture("DirectLighting"));
 
 
-    
+    if (!capsaicin.setCurrentBRDFModel(BRDF_NAMES[options_.brdf_model]))
+    {
+        GFX_PRINTLN("Failed to set BRDF model");
+    }
     return true;
 }
 
@@ -236,6 +244,10 @@ void MultiScatterTests::render([[maybe_unused]] CapsaicinInternal &capsaicin) no
         gfx_, shadingProgram_, "g_GradientsBuffer", capsaicin.getSharedTexture("Gradients"));
     gfxProgramSetParameter(
         gfx_, shadingProgram_, "g_RoughnessBuffer", capsaicin.getSharedTexture("Roughness"));
+    gfxProgramSetParameter(
+        gfx_, shadingProgram_, "g_MaterialMetallicityBuffer", capsaicin.getSharedTexture("MaterialMetallicity"));
+    gfxProgramSetParameter(
+        gfx_, shadingProgram_, "g_MaterialRoughnessBuffer", capsaicin.getSharedTexture("MaterialRoughness"));
     gfxProgramSetParameter(gfx_, shadingProgram_, "g_OcclusionAndBentNormalBuffer",
         capsaicin.getSharedTexture("OcclusionAndBentNormal"));
     gfxProgramSetParameter(
@@ -307,6 +319,10 @@ void MultiScatterTests::renderGUI(CapsaicinInternal &capsaicin) const noexcept
     if (ImGui::Combo("BRDF Model", &model, "CookTorrance\0Fast-MSX\0Heitz\0StudentT\0"))
     {
         capsaicin.setOption("brdf_model", model);
+        if (!capsaicin.setCurrentBRDFModel(BRDF_NAMES[model]))
+        {
+            GFX_PRINTLN("Failed to set BRDF model");
+        }
     }
 }
 

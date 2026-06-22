@@ -259,6 +259,9 @@ void ReferencePT::renderGUI(CapsaicinInternal &capsaicin) const noexcept
     ImGui::Checkbox("Enable Accumulation", &capsaicin.getOption<bool>("reference_pt_accumulate"));
 }
 
+static char const *BRDF_NAMES[] = {
+    "GGX", "CookTorrance", "FastMSX", "HeitzBeckmann", "HeitzStudentT", "HeitzGGX"};
+
 bool ReferencePT::initKernels(CapsaicinInternal const &capsaicin) noexcept
 {
     // Set up the base defines based on available features
@@ -295,6 +298,10 @@ bool ReferencePT::initKernels(CapsaicinInternal const &capsaicin) noexcept
         defines.push_back("DISABLE_NEE");
     }
     std::string                     brdfDefine = "BRDF_MODEL=" + std::to_string(options.brdf_model);
+    if (!capsaicin.setCurrentBRDFModel(BRDF_NAMES[options.brdf_model]))
+    {
+        GFX_PRINTLN("Failed to set BRDF model");
+    }
     static std::vector<std::string> persistentDefines;
     persistentDefines.clear();
     persistentDefines.push_back(brdfDefine);

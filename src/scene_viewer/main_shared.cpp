@@ -1958,6 +1958,8 @@ filesystem::path CapsaicinMain::getSaveName()
     savePath += Capsaicin::GetSceneCurrentCamera();
     savePath += '_';
     savePath += Capsaicin::GetCurrentRenderer();
+    savePath += '_';
+    savePath += Capsaicin::GetCurrentBRDF();
     auto filename = savePath.filename().string();
     erase_if(filename, [](unsigned char const c) { return isspace(c); });
     savePath.replace_filename(filename);

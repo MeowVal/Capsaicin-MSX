@@ -63,6 +63,24 @@ bool SetRenderer(std::string_view const &name) noexcept
     return false;
 }
 
+std::string_view GetCurrentBRDF() noexcept
+{
+    if (g_renderer != nullptr)
+    {
+        return g_renderer->getCurrentBRDFModel();
+    }
+    return "";
+}
+
+bool SetBRDFModel(std::string_view const &name) noexcept
+{
+    if (g_renderer != nullptr)
+    {
+        return g_renderer->setCurrentBRDFModel(name);
+    }
+    return false;
+}
+
 std::vector<std::filesystem::path> GetCurrentScenes() noexcept
 {
     if (g_renderer != nullptr)

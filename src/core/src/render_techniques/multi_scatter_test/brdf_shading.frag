@@ -15,6 +15,8 @@ Texture2D g_DepthBuffer;
 Texture2D g_ShadingNormalBuffer;
 Texture2D g_GradientsBuffer;
 Texture2D g_RoughnessBuffer;
+Texture2D g_MaterialMetallicityBuffer;
+Texture2D g_MaterialRoughnessBuffer;
 Texture2D g_VisibilityBuffer;
 Texture2D g_OcclusionAndBentNormalBuffer;
 

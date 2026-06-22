@@ -400,6 +400,17 @@ string_view CapsaicinInternal::getCurrentRenderer() const noexcept
     return renderer_name_;
 }
 
+string_view CapsaicinInternal::getCurrentBRDFModel() const noexcept
+{
+    return brdf_name_;
+}
+
+bool CapsaicinInternal::setCurrentBRDFModel(string_view name) const noexcept
+{
+    brdf_name_ = name;
+    return true;
+}
+
 bool CapsaicinInternal::setRenderer(string_view const &name) noexcept
 {
     auto const renderers = RendererFactory::getNames();

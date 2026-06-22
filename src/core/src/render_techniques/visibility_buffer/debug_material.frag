@@ -64,7 +64,7 @@ float4 DebugMaterial(in float4 pos : SV_Position) : SV_Target
     switch (g_MaterialMode)
     {
         case 0:
-            return float4(materialEvaluated.albedo, 1.0f);
+            return float4(materialEvaluated.albedo_linear, 1.0f);
         case 1:
             return float4(materialEvaluated.metallicity.xxx, 1.0f);
         case 2:

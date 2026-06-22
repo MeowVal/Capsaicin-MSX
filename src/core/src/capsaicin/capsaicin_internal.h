@@ -359,6 +359,8 @@ public:
      * @return The current renderer name.
      */
     [[nodiscard]] std::string_view getCurrentRenderer() const noexcept;
+    [[nodiscard]] std::string_view getCurrentBRDFModel() const noexcept;
+    [[nodiscard]] bool             setCurrentBRDFModel(std::string_view name) const noexcept;
 
     /**
      * Sets the current renderer.
@@ -1062,6 +1064,7 @@ private:
     std::vector<ComponentPair> components_;         /**< The list of render component currently in use. */
     std::string_view           renderer_name_;      /**< Currently used renderer string name */
     std::unique_ptr<Renderer>  renderer_ = nullptr; /**< Currently used renderer */
+    mutable std::string        brdf_name_;          /**< Currently used BRDF string name (if applicable) */
     using DebugViews                     = std::vector<std::pair<std::string_view, bool>>;
     DebugViews       debug_views_; /**< List of available debug views */
     std::string_view debug_view_;  /**< The debug view to use (get available from GetDebugViews() -

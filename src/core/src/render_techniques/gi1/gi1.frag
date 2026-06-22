@@ -110,7 +110,7 @@ PS_OUTPUT ResolveGI1(in float4 pos : SV_Position)
             areaEmissivity, mesh_uv, mesh_uv, mesh_uv);
     float3 emissiveRadiance = evaluateAreaLight(emissiveLight, 0.0f.xx/*Use bogus barycentrics as correct UV is already stored*/);
 
-    MaterialBRDF materialBRDF = MakeMaterialBRDF(material_evaluated, 0);
+    MaterialBRDF materialBRDF = MakeMaterialBRDF(material_evaluated);
     if (g_DisableAlbedoTextures)
     {
         materialBRDF.albedo = 0.3f.xxx;

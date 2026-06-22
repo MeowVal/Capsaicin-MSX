@@ -940,7 +940,7 @@ void SampleScreenProbes(in uint did : SV_DispatchThreadID, in uint local_id : SV
         float3 shading_normal = normalize(2.0f * g_ShadingNormalBuffer.Load(int3(seed, 0)).xyz - 1.0f);
 
         Material material = g_MaterialBuffer[instance.material_index];
-        MaterialBRDF materialBRDF = MakeMaterialBRDF(material, mesh_uv, 0);
+        MaterialBRDF materialBRDF = MakeMaterialBRDF(material, mesh_uv);
 
         // Transform the view direction into the surfaces tangent coordinate space (oriented so that z axis is aligned to normal)
         Quaternion localRotation = QuaternionRotationZ(normal);
@@ -1913,7 +1913,7 @@ void PopulateMultibounceCells(uint did)
     materialEvaluated.roughness = 1.0f;
 #   endif // DISABLE_SPECULAR_MATERIALS
 
-    MaterialBRDF materialBRDF = MakeMaterialBRDF(materialEvaluated, 0);
+    MaterialBRDF materialBRDF = MakeMaterialBRDF(materialEvaluated);
 
     // Recover the ray origin
     uint query_index = g_HashGridCache_VisibilityQueryBuffer[did];
@@ -2015,7 +2015,7 @@ void PopulateCellsHandleMiss(uint did, inout PopulateCellsPayload payload, RayIn
 
     // And evaluate our lighting
     payload.lighting =
-        evaluateBRDF(material, payload.normal, normalize(origin - payload.world), ray.direction)
+        evaluateBRDF_GGX(material, payload.normal, normalize(origin - payload.world), ray.direction)
         * light_radiance * light_weight;
 }
 
@@ -2508,7 +2508,7 @@ void GenerateReservoirs(in uint did : SV_DispatchThreadID)
     material2.metallicity = 0.0f;
     material2.roughness = 1.0f;
 #   endif // DISABLE_SPECULAR_MATERIALS
-    MaterialBRDF materialBRDF = MakeMaterialBRDF(material2, 0);
+    MaterialBRDF materialBRDF = MakeMaterialBRDF(material2);
     Random random = MakeRandom(did, g_FrameIndex);
     Reservoir reservoir = sampleLightsListCone<kReservoir_SampleCount>(random, world, normal, view_direction, solid_angle, materialBRDF);
 
@@ -2654,7 +2654,7 @@ void GenerateMultibounceReservoirs(in uint did : SV_DispatchThreadID)
     material2.metallicity = 0.0f;
     material2.roughness = 1.0f;
 #       endif // DISABLE_SPECULAR_MATERIALS
-    MaterialBRDF materialBRDF = MakeMaterialBRDF(material2, 0);
+    MaterialBRDF materialBRDF = MakeMaterialBRDF(material2);
     Random random = MakeRandom(did, g_FrameIndex);
     Reservoir reservoir = sampleLightsListCone<kReservoir_SampleCount>(random, world, normal, view_direction, solid_angle, materialBRDF);
 
